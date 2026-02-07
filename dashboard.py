@@ -64,7 +64,6 @@ st.markdown("""
 # ====== BARRE LATERALE - PARAMETRES JURIDIQUES ======
 st.sidebar.markdown("### ⚖️ Paramètres du Secteur")
 
-# Sélecteur Commission Paritaire (CP)
 TARGET_CP = st.sidebar.selectbox(
         "Commission Paritaire",
         options=["CP 330"],
@@ -72,7 +71,6 @@ TARGET_CP = st.sidebar.selectbox(
         help="Commission Paritaire pour la Santé Publique"
 )
 
-# Sélecteur Service
 SERVICES = {
         "🏥 Soins Infirmiers": "soins_infirmiers",
         "⚙️ Technique": "technique",
@@ -87,7 +85,6 @@ SERVICE = st.sidebar.selectbox(
 )
 SERVICE_CODE = SERVICES[SERVICE]
 
-# Sélecteur Statut de l'Agent
 STATUTS = {
         "📋 Statutaire/Nommé": "statutaire",
         "📝 Contractuel": "contractuel",
@@ -101,19 +98,14 @@ STATUT = st.sidebar.selectbox(
 )
 STATUT_CODE = STATUTS[STATUT]
 
-# Affichage du contexte juridique
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
 **📌 Contexte Juridique Actif:**
 - **CP**: CP 330 (Santé Publique)
 - **Région**: Bruxelles-Capitale
-- **Bases Légales**: 
-  - Iriscare / Santé Bruxelles
-    - Moniteur Belge
-      - Circulaires régionales
-      """)
+- **Bases Légales**: Iriscare, Moniteur Belge, Circulaires régionales
+""")
 
-# ====== BANNEAU JURIDIQUE ======
 st.markdown(f"""
 <div class="legal-banner">
     <strong>⚖️ Cadre Juridique: CP 330 | Région Bruxelles-Capitale</strong><br>
@@ -121,10 +113,8 @@ st.markdown(f"""
         </div>
         """, unsafe_allow_html=True)
 
-# ====== ONGLETS PRINCIPAUX ======
 tab1, tab2 = st.tabs(["💬 Chat Juridique", "📱 Générateur de Mobilisation"])
 
-# ====== TAB 1: CHAT JURIDIQUE ======
 with tab1:
         st.markdown("### 💬 Posez votre question aux Protocoles du CHU Brugmann")
 
@@ -156,12 +146,10 @@ with tab1:
                     if response.status_code == 200:
                                                 result = response.json()
 
-                        # Afficher la réponse
-                                                st.markdown("### 📖 Réponse de LECH Solidar")
-                                                st.markdown(result.get("response", "Pas de réponse disponible"))
+                        st.markdown("### 📖 Réponse de LECH Solidar")
+                        st.markdown(result.get("response", "Pas de réponse disponible"))
 
-                        # Indicateur de conformité
-                                                compliance = result.get("compliance_score", 0)
+                        compliance = result.get("compliance_score", 0)
                         if compliance >= 0.8:
                                                         st.markdown(
                                                                                             '<div class="compliance-vert">✅ CONFORME - Information extraite des protocoles CHU Brugmann</div>',
@@ -173,20 +161,18 @@ else:
                                                                 unsafe_allow_html=True
                             )
 
-                        # Sources
-                            if "sources" in result:
-                                                            st.markdown("**📚 Sources citées:**")
-                                                            for source in result["sources"]:
-                                                                                                st.write(f"• {source}")
+                        if "sources" in result:
+                                                        st.markdown("**📚 Sources citées:**")
+                                                        for source in result["sources"]:
+                                                                                            st.write(f"• {source}")
 
-                                                        # Bouton WhatsApp Alert
-                                                        if result.get("violation_detected"):
-                                                                                        st.warning("🚨 Violation potentielle détectée!")
-                                                                                        if st.button("📲 Générer Alerte WhatsApp"):
-                                                                                                                            whatsapp_msg = result.get("whatsapp_alert", "")
-                                                                                                                            st.code(whatsapp_msg, language="text")
-                                                                                                                            st.success("Message préparé pour partage WhatsApp")
-                                                            else:
+                                                    if result.get("violation_detected"):
+                                                                                    st.warning("🚨 Violation potentielle détectée!")
+                                                                                    if st.button("📲 Générer Alerte WhatsApp"):
+                                                                                                                        whatsapp_msg = result.get("whatsapp_alert", "")
+                                                                                                                        st.code(whatsapp_msg, language="text")
+                                                                                                                        st.success("Message préparé pour partage WhatsApp")
+                                                        else:
                         st.error(f"❌ Erreur API: {response.status_code}")
 
 except requests.exceptions.Timeout:
@@ -196,7 +182,6 @@ except Exception as e:
 else:
             st.warning("📝 Veuillez poser une question")
 
-# ====== TAB 2: GENERATEUR DE MOBILISATION ======
 with tab2:
         st.markdown("### 📱 Générateur de Tracts WhatsApp")
 
@@ -206,7 +191,7 @@ with tab2:
     )
 
     tract_audience = st.selectbox(
-                "Public cible",
+        "Public cible",
                 ["Tous les agents", "Stagiaires", "Contractuels", "Personnels technique"]
     )
 
@@ -231,7 +216,6 @@ with tab2:
         st.text_area("Contenu du tract", value=tract_content, height=300)
         st.download_button("📥 Télécharger", data=tract_content, file_name=f"tract_{tract_theme}.txt")
 
-# ====== FOOTER CGSP ======
 st.markdown("""
 <div class="footer-cgsp">
     Construit avec ❤️ pour la défense des droits au CHU Brugmann<br>
