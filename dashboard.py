@@ -9,217 +9,167 @@ PROJECT_ID = st.secrets.get("PROJECT_ID", "")
 DATA_STORE_ID = st.secrets.get("DATA_STORE_ID", "")
 
 # ====== PAGE CONFIG & STYLING CGSP ======
-st.set_page_config(page_title="NExUS - LECH Solidar", page_icon="✊", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="NExUS – LECH Solidar", page_icon="✊", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-.cgsp-header { 
-    background: linear-gradient(135deg, #E2001A 0%, #c41815 100%); 
-        color: white; 
-            padding: 30px; 
-                border-radius: 10px; 
+.cgsp-header {
+    background: linear-gradient(135deg, #E2001A 0%, #c41507 100%);
+        color: white;
+            padding: 30px;
+                border-radius: 10px;
                     margin: 0 0 20px 0;
                         text-align: center;
                         }
-                        .cgsp-header h1 { margin: 0; font-size: 2.5em; font-weight: bold; }
-                        .cgsp-header p { margin: 5px 0 0 0; font-size: 1.1em; opacity: 0.9; }
-                        .compliance-vert { 
-                            background-color: #d4edda; 
-                                color: #155724; 
-                                    padding: 12px; 
-                                        border-radius: 5px; 
-                                            font-weight: bold; 
-                                                border-left: 4px solid #28a745;
+                        .cgsp-header h1 {
+                            margin: 0;
+                                font-size: 2.5em;
+                                    font-weight: bold;
+                                    }
+                                    .cgsp-header p {
+                                        margin: 5px 0 0 0;
+                                            font-size: 1.1em;
+                                                opacity: 0.9;
                                                 }
-                                                .compliance-rouge { 
-                                                    background-color: #f8d7da; 
-                                                        color: #721c24; 
-                                                            padding: 12px; 
-                                                                border-radius: 5px; 
-                                                                    font-weight: bold; 
-                                                                        border-left: 4px solid #dc3545;
-                                                                        }
-                                                                        .legal-banner {
-                                                                            background-color: #f8f9fa;
-                                                                                border-left: 4px solid #E2001A;
-                                                                                    padding: 12px;
-                                                                                        margin: 15px 0;
-                                                                                            border-radius: 5px;
-                                                                                            }
-                                                                                            .footer-cgsp {
-                                                                                                text-align: center;
-                                                                                                    margin-top: 30px;
-                                                                                                        padding-top: 20px;
-                                                                                                            border-top: 2px solid #E2001A;
-                                                                                                                font-size: 0.9em;
-                                                                                                                    color: #666;
-                                                                                                                    }
-                                                                                                                    </style>
-                                                                                                                    <div class="cgsp-header">
-                                                                                                                        <h1>✊ NExUS - LECH Solidar</h1>
-                                                                                                                            <p>L'Intelligence au service des Camarades</p>
-                                                                                                                            </div>
-                                                                                                                            """, unsafe_allow_html=True)
+                                                .compliance-vert {
+                                                    background-color: #d4edda;
+                                                        color: #155724;
+                                                            padding: 12px;
+                                                                border-radius: 5px;
+                                                                    font-weight: bold;
+                                                                    }
+                                                                    .compliance-rouge {
+                                                                        background-color: #f8d7da;
+                                                                            color: #721c24;
+                                                                                padding: 12px;
+                                                                                    border-radius: 5px;
+                                                                                        font-weight: bold;
+                                                                                        }
+                                                                                        .service-box {
+                                                                                            background-color: #f7f3ff;
+                                                                                                border-left: 4px solid #E2001A;
+                                                                                                    padding: 12px;
+                                                                                                        margin: 10px 0;
+                                                                                                        }
+                                                                                                        </style>
+                                                                                                        """, unsafe_allow_html=True)
 
-# ====== BARRE LATERALE - PARAMETRES JURIDIQUES ======
-st.sidebar.markdown("### ⚖️ Paramètres du Secteur")
+st.markdown('<div class="cgsp-header"><h1>✊ NExUS - LECH Solidar</h1><p>L\'Intelligence au service des Camarades</p></div>', unsafe_allow_html=True)
 
-TARGET_CP = st.sidebar.selectbox(
-        "Commission Paritaire",
-        options=["CP 330"],
-        index=0,
-        help="Commission Paritaire pour la Santé Publique"
-)
+st.markdown('⚖️ **Cadre Juridique**: CP 330 | Région Bruxelles-Capitale')
 
-SERVICES = {
-        "🏥 Soins Infirmiers": "soins_infirmiers",
-        "⚙️ Technique": "technique",
-        "🏢 Administration": "administration",
-        "📦 Logistique": "logistique",
-        "👔 Direction": "direction"
-}
-SERVICE = st.sidebar.selectbox(
-        "Service",
-        options=list(SERVICES.keys()),
-        help="Sélectionnez votre département"
-)
-SERVICE_CODE = SERVICES[SERVICE]
+# ====== SIDEBAR CONFIGURATION ======
+with st.sidebar:
+        st.markdown('### 📋 Filtres de Recherche Juridique')
 
-STATUTS = {
-        "📋 Statutaire/Nommé": "statutaire",
-        "📝 Contractuel": "contractuel",
-        "🎓 Stagiaire": "stagiaire",
-        "👨‍🎓 Étudiant": "etudiant"
-}
-STATUT = st.sidebar.selectbox(
-        "Statut de l'Agent",
-        options=list(STATUTS.keys()),
-        help="Votre statut d'emploi"
-)
-STATUT_CODE = STATUTS[STATUT]
+    st.markdown('**Commission Paritaire**')
+    TARGET_CP = st.selectbox(
+                'Sélectionnez votre commission:',
+                ['CP 330 (Santé Publique)', 'CP 331 (Enseignement)', 'CP 332 (Private Sector)'],
+                label_visibility='collapsed'
+    )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-**📌 Contexte Juridique Actif:**
-- **CP**: CP 330 (Santé Publique)
-- **Région**: Bruxelles-Capitale
-- **Bases Légales**: Iriscare, Moniteur Belge, Circulaires régionales
-""")
+    st.markdown('**Service**')
+    SERVICE = st.selectbox(
+                'Service:',
+                ['Soins Infirmiers', 'Technique', 'Logistique', 'Administration', 'Direction'],
+                label_visibility='collapsed'
+    )
 
-st.markdown(f"""
-<div class="legal-banner">
-    <strong>⚖️ Cadre Juridique: CP 330 | Région Bruxelles-Capitale</strong><br>
-        <small>Vous consultez en tant que: <strong>{STATUT}</strong> au service <strong>{SERVICE}</strong></small>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown('**Statut de l\'Agent**')
+    STATUT = st.selectbox(
+                'Statut:',
+                ['Statutaire/Nommé', 'Contractuel', 'Stagiaire', 'Étudiant'],
+                label_visibility='collapsed'
+    )
 
-tab1, tab2 = st.tabs(["💬 Chat Juridique", "📱 Générateur de Mobilisation"])
+    st.markdown('---')
+    st.markdown('### ℹ️ À Propos')
+    st.info('💪 LECH Solidar - Construit avec ❤️ pour la défense des droits au CHU Brugmann')
+
+# ====== TAB CREATION ======
+tab1, tab2 = st.tabs(['💬 Chat Juridique', '📱 Générateur de Mobilisation'])
 
 with tab1:
-        st.markdown("### 💬 Posez votre question aux Protocoles du CHU Brugmann")
+        st.markdown('### 💬 Interrogez les Archives Juridiques')
+        st.markdown('Posez vos questions sur les protocoles CHU Brugmann, CP 330 et droits des syndicats.')
 
-    question_input = st.text_area(
-                "Votre question:",
-                placeholder="Ex: Un stagiaire a-t-il droit à la prime de fin d'année ?",
-                height=100,
-                label_visibility="collapsed"
+    question = st.text_area(
+                '✍️ Votre question:',
+                placeholder='Ex: "Un stagiaire a-t-il droit à la prime de fin d\'année ?"',
+                height=100
     )
 
-    if st.button("🔍 Interroger les Archives", type="primary", use_container_width=True):
-                if question_input.strip():
-                                with st.spinner("⏳ Recherche en cours dans les protocoles..."):
-                                                    try:
-                                                                            payload = {
-                                                                                                        "question": question_input,
-                                                                                                        "cp": TARGET_CP,
-                                                                                                        "service": SERVICE_CODE,
-                                                                                                        "statut": STATUT_CODE,
-                                                                                                        "timestamp": datetime.now().isoformat()
-                                                                                }
+    col1, col2 = st.columns([3, 1])
+    with col1:
+                pass
+            with col2:
+                        if st.button('🔍 Interroger les Archives', type='primary'):
+                                        if question.strip():
+                                                            with st.spinner('⏳ Recherche en cours...'):
+                                                                                    try:
+                                                                                                                payload = {
+                                                                                                                                                'query': question,
+                                                                                                                                                'user_profile': {
+                                                                                                                                                                                    'commission_paritaire': TARGET_CP,
+                                                                                                                                                                                    'service': SERVICE,
+                                                                                                                                                                                    'statut': STATUT
+                                                                                                                                                    }
+                                                                                                                    }
+                                                                                                                
+                        headers = {'Content-Type': 'application/json'}
+                                        response = requests.post(CLOUD_FUNCTION_URL, json=payload, headers=headers, timeout=30)
 
-                    response = requests.post(
-                                                CLOUD_FUNCTION_URL,
-                                                json=payload,
-                                                timeout=30
-                    )
+                        if response.status_code == 200:
+                                                        data = response.json()
 
-                    if response.status_code == 200:
-                                                result = response.json()
+                            st.markdown('---')
+                            st.markdown('### ✅ Réponse de NExUS')
 
-                        st.markdown("### 📖 Réponse de LECH Solidar")
-                        st.markdown(result.get("response", "Pas de réponse disponible"))
+                            if 'fulfillment' in data and 'messages' in data['fulfillment']:
+                                                                for msg in data['fulfillment']['messages']:
+                                                                                                        st.markdown(msg.get('text', ''))
 
-                        compliance = result.get("compliance_score", 0)
-                        if compliance >= 0.8:
-                                                        st.markdown(
-                                                                                            '<div class="compliance-vert">✅ CONFORME - Information extraite des protocoles CHU Brugmann</div>',
-                                                                                            unsafe_allow_html=True
-                                                        )
+                                                            if 'compliance_score' in data:
+                                                                                                score = data['compliance_score']
+                                                                                                if score >= 80:
+                                                                                                                                        st.markdown('<div class="compliance-vert">✅ Réponse Conforme - Score: ' + str(score) + '%</div>', unsafe_allow_html=True)
+                                                                else:
+                                    st.markdown('<div class="compliance-rouge">⚠️ Réponse Non Conforme - Score: ' + str(score) + '%</div>', unsafe_allow_html=True)
+
+                                                                                                if 'violation_detected' in data and data['violation_detected']:
+                                                                                                                                    st.warning('⚠️ Violation détectée - Veuillez consulter un délégué')
 else:
-                            st.markdown(
-                                                                '<div class="compliance-rouge">⚠️ VÉRIFICATION RECOMMANDÉE - Consultez un délégué permanent</div>',
-                                                                unsafe_allow_html=True
-                            )
+                            st.error(f'Erreur serveur: {response.status_code}')
 
-                        if "sources" in result:
-                                                        st.markdown("**📚 Sources citées:**")
-                                                        for source in result["sources"]:
-                                                                                            st.write(f"• {source}")
-
-                                                    if result.get("violation_detected"):
-                                                                                    st.warning("🚨 Violation potentielle détectée!")
-                                                                                    if st.button("📲 Générer Alerte WhatsApp"):
-                                                                                                                        whatsapp_msg = result.get("whatsapp_alert", "")
-                                                                                                                        st.code(whatsapp_msg, language="text")
-                                                                                                                        st.success("Message préparé pour partage WhatsApp")
-                                                        else:
-                        st.error(f"❌ Erreur API: {response.status_code}")
-
-except requests.exceptions.Timeout:
-                    st.error("⏱️ Délai d'attente dépassé. Veuillez réessayer.")
 except Exception as e:
-                    st.error(f"❌ Erreur: {str(e)}")
+                        st.error(f'Erreur de connexion: {str(e)}')
 else:
-            st.warning("📝 Veuillez poser une question")
+                st.warning('Veuillez poser une question')
 
 with tab2:
-        st.markdown("### 📱 Générateur de Tracts WhatsApp")
+        st.markdown('### 📱 Générateur de Mobilisation')
+    st.markdown('Créez des messages de mobilisation pour vos camarades.')
 
-    tract_theme = st.selectbox(
-                "Thème du tract",
-                ["Prime de fin d'année", "Stagiaires - Droits", "Heures supplémentaires", "Congés", "Sécurité au travail"]
+    theme = st.selectbox(
+                'Thème:',
+                ['Droits syndicaux', 'Sécurité et santé', 'Conditions de travail', 'Discrimination', 'Harcèlement']
     )
 
-    tract_audience = st.selectbox(
-        "Public cible",
-                ["Tous les agents", "Stagiaires", "Contractuels", "Personnels technique"]
+    action = st.text_area(
+                'Action demandée:',
+                placeholder='Ex: "Exiger le respect de l\'accord du 12 décembre"',
+                height=80
     )
 
-    if st.button("✍️ Générer le Tract", use_container_width=True):
-                tract_content = f"""
-                🚨 **{tract_theme}** 🚨
+    if st.button('📝 Générer le Tract', type='primary'):
+                if action.strip():
+                                st.markdown('---')
+            st.markdown(f'### 📢 Tract - {theme}')
+            st.markdown(f'> **Camarades**, {action.lower()}\n\n**Solidarité ✊**')
+else:
+            st.warning('Veuillez décrire l\'action')
 
-                Camarades,
-
-                Ce tract concerne: **{tract_audience}**
-
-                Réclamez vos droits basés sur:
-                ✅ CP 330 (Santé Publique)
-                ✅ Protocoles CHU Brugmann
-                ✅ Région Bruxelles-Capitale
-
-                **ENSEMBLE, AUCUNE RETRAIT!**
-                Contactez votre délégué CGSP
-
-                #UnionFaitLaForce #Solidarité #CGSPBreugmann
-                        """
-        st.text_area("Contenu du tract", value=tract_content, height=300)
-        st.download_button("📥 Télécharger", data=tract_content, file_name=f"tract_{tract_theme}.txt")
-
-st.markdown("""
-<div class="footer-cgsp">
-    Construit avec ❤️ pour la défense des droits au CHU Brugmann<br>
-        © 2025 CGSP • NExUS - LECH Solidar<br>
-            <small>v2.0 - Déploiement complet finalisé ✅</small>
-            </div>
-            """, unsafe_allow_html=True)
+# ====== FOOTER ======
+st.markdown('---')
+st.markdown('Construit avec ❤️ pour la défense des droits au CHU Brugmann | © 2025 CGSP')
