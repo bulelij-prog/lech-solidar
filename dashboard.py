@@ -34,34 +34,37 @@ question = st.text_area("Votre question", placeholder="Exemple: Comment réclame
 b1, b2 = st.columns(2)
 
 if b1.button("🔍 Interroger la Base Juridique"):
-       if question.strip():
-                  if not cloud_url.startswith("http"):
-                                 st.error("URL de la Cloud Function invalide ou manquante dans les Secrets.")
-       else:
-                      payload = {
-                                         "query": question,
-                                         "commission_paritaire": cp,
-                                         "service": service,
-                                         "statut": statut,
-                                         "region": "Bruxelles-Capitale"
-                      }
-                      with st.spinner("Interrogation de la base juridique en cours..."):
-                                         response = requests.post(cloud_url, json=payload, timeout=30)
-                                         if response.status_code == 200:
-                                                                data = response.json()
-                                                                messages = data.get("fulfillmentMessages", [])
-                                                                if messages:
-                                                                                           reply = messages[0].get("text", {}).get("text", ["Pas de réponse"])[0]
-                                                                                           st.info(reply)
-                                         else:
-                                                                    st.warning("Pas de réponse reçue")
-       else:
-                       st.error(f"Erreur: {response.status_code}")
-else:
+    if question.strip():
+        if not cloud_url.startswith("http"):
+            st.error("URL de la Cloud Function invalide ou manquante dans les Secrets.")
+        else:
+            payload = {
+                "query": question,
+                "commission_paritaire": cp,
+                "service": service,
+                "statut": statut,
+                "region": "Bruxelles-Capitale"
+            }
+            with st.spinner("Interrogation de la base juridique en cours..."):
+                try:
+                    response = requests.post(cloud_url, json=payload, timeout=30)
+                    if response.status_code == 200:
+                        data = response.json()
+                        messages = data.get("fulfillmentMessages", [])
+                        if messages:
+                            reply = messages[0].get("text", {}).get("text", ["Pas de réponse"])[0]
+                            st.info(reply)
+                        else:
+                            st.warning("Pas de réponse reçue")
+                    else:
+                        st.error(f"Erreur: {response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"Erreur de connexion: {e}")
+    else:
         st.warning("Veuillez poser une question")
 
 if b2.button("🗑️ Effacer"):
-       pass
+    pass
 
 st.divider()
 st.caption("© 2025 CGSP - Commission Paritaire 330 | Région Bruxelles-Capitale")
