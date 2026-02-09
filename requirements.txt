@@ -1,8 +1,0 @@
-streamlit==1.28.1
-requests==2.31.0
-google-cloud-discoveryengine==0.14.0
-google-cloud-aiplatform==1.43.0
-google-auth==2.25.2
-google-api-core==2.11.1
-protobuf==4.25.1functions-framework==3.5.0
-vertexai>=0.4.0
