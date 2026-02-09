@@ -1,0 +1,10 @@
+streamlit==1.28.1
+requests
+google-cloud-discoveryengine
+google-cloud-aiplatform
+google-auth
+google-api-core
+protobuf
+vertexai
+functions-framework
+rich<14
