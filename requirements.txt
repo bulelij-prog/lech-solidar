@@ -1,6 +1,6 @@
-streamlit==1.28.1
-requests==2.31.0
-google-cloud-discoveryengine==0.14.0
-google-cloud-aiplatform==1.43.0
-vertexai==0.13.0
-functions-framework==3.5.0
+streamlit
+requests
+google-cloud-discoveryengine
+google-cloud-aiplatform
+vertexai
+functions-framework
