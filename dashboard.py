@@ -103,7 +103,7 @@ def appel_nexus(query_text, mode="question"):
         "service": service,
         "statut": statut,
         "region": "Bruxelles-Capitale",
-        "vertex_ai_region": "europe-west1",
+        "vertex_ai_region": "us-central1",
         "data_store_filter": "iris_brugmann",
         "mode": mode
     }
