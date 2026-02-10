@@ -1,84 +1,78 @@
 import functions_framework
-from vertexai.generative_models import GenerativeModel
+import vertexai
+from vertexai.generative_models import GenerativeModel, Part, Content
 from google.cloud import discoveryengine
 import json
-import vertexai
+import streamlit as st
 
 PROJECT_ID = "syndicat-novembre-2025"
 LOCATION = "europe-west1"
 DATA_STORE_ID = "nexus-cgsp-pdf-global_1734540151649"
-VIOLATION_KEYWORDS = ["violation", "illegal", "non conforme", "invalide", "ne respecte pas", "contraire", "avis insuffisant", "inferieur"]
+VIOLATION_KEYWORDS = ["violation", "illegal", "non conforme", "invalide", "ne respecte pas", "contraire", "avis insuffisant"]
 
-# Initialize Vertex AI
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+@st.cache_resource
+def init_vertexai():
+    """Initialize Vertex AI with caching"""
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
+    return GenerativeModel("gemini-1.5-pro")
 
 def search_discovery_engine(query):
-    try:
-        client = discoveryengine.DocumentServiceClient()
-        request = discoveryengine.SearchRequest(
-            serving_config=f"projects/{PROJECT_ID}/locations/{LOCATION}/collections/default_collection/dataStores/{DATA_STORE_ID}/servingConfigs/default_config",
-            query=query,
-            page_size=5)
-        response = client.search(request)
-        results = [r.document.derived_struct_data for r in response.results]
-        print(f"[DATA_STORE] Found {len(results)} documents")
-        return results
-    except Exception as e:
-        print(f"[ERROR_DATA_STORE] {str(e)}")
-        return []
+    """Search using Discovery Engine API"""
+    client = discoveryengine.DocumentServiceClient()
+    request = discoveryengine.SearchRequest(
+        query=query,
+        page_size=5)
+    response = client.search(request)
+    results = [r.document.derived_struct_data for r in response.results]
+    print(f"[DATA_STORE] Found {len(results)} documents")
+    return results
 
 def check_compliance(question):
+    """Main compliance check function"""
+    model = init_vertexai()
+    prompt = f"""Tu es NExUS, assistant juridique et audit de conformit pour le CHU Brugmann.
+
+SYSTME_PROMPT_CITATION = (
+  "Tu es NExUS, assistante juridique de la dlgation CGSP au CHU Brugmann. "
+  "Rgles ABSOLUES pour chaque rponse : "
+  "1) CITE toujours la source exacte (ex: 'Art. 5, CCT du 12/03/2019 - CP 330', "
+  "2) Protocole Brugmann du 15/01/2022, Section 3.2', 'Loi du 04/08/2015...')."
+  "3) Applique le PRINCIPE DE FAVEUR : si une disposition est MOINS favorable "
+  "qu'une autre, signale-le clairement avec '[ALERTE FAVEUR]'."
+  "4) Structure ta rponse : Analyse > Sources > Recommandation d'action. "
+  "5) Ds que tu identifies une question hors compliance, signale : '5) Appelle le PRINCIPE DE FAVEUR : si une disposition est MOINS favorable "
+  "qu'une autre, signale-le clairement avec '[ALERTE FAVEUR]'."
+  "6) Structure ta rponse : Analyse > Sources > Recommandation d'action. "
+  "7) Si tu ne sais pas, tu dis : '5) Appelle le PRINCIPE DE FAVEUR : si une disposition est MOINS favorable "
+  "qu'une autre, signale-le clairement avec '[ALERTE FAVEUR]'."
+  "8) Structure ta rponse : Analyse > Sources > Recommandation d'action. "
+  "9) Si tu ne sais pas, tu dis : 'aucun contenu disponible. Lancez un audit ou saisissez des points.'"
+)
+
+Question pose: {question}
+
+Utilise UNIQUEMENT les donnes du CHU Brugmann et la jurisprudence belge. Analyse la conformit."""
+
+    response = model.generate_content(prompt)
+    
     try:
-        # Initialize Gemini model
-        model = GenerativeModel("gemini-pro")
-        
-        # Prepare context from data store
-        documents = search_discovery_engine(question)
-        context = "\n".join([str(doc) for doc in documents]) if documents else "No documents found"
-        
-        # Create prompt
-        prompt = f"""You are a compliance expert for labor rights. Analyze the following question against the context provided and identify any violations.
-        
-Question: {question}
-
-Context from company documents:
-{context}
-
-Respond with JSON format:
-{{"compliance": "CONFORME" or "NON-CONFORME", "reason": "explanation", "sources": ["source1", "source2"]}}"""
-        
-        response = model.generate_content(prompt)
-        
-        # Parse response
-        try:
-            result = json.loads(response.text)
-            return result
-        except:
-            return {"compliance": "ERROR", "reason": response.text}
-            
-    except Exception as e:
-        print(f"[ERROR_VERTEX_AI] {str(e)}")
-        return {"compliance": "ERROR", "reason": str(e)}
+        result = json.loads(response.text)
+        return result
+    except:
+        return {"compliance": "ERROR", "reason": response.text}
 
 @functions_framework.http
 def lech_solidar_orchestrator(request):
-    """HTTP Cloud Function entry point"""
-    try:
-        # Get question from request
-        request_json = request.get_json(silent=True) or {}
-        question = request_json.get('question') or request.args.get('question')
-        
-        if not question:
-            return {"error": "No question"}, 400
-        
-        print(f"[INIT] Cloud Function invoked")
-        print(f"[QUESTION] {question}")
-        
-        # Check compliance
-        result = check_compliance(question)
-        
-        return result, 200
-        
-    except Exception as e:
-        print(f"[ERROR] {str(e)}")
-        return {"error": str(e)}, 500
+    """Cloud Function entry point"""
+    print("[INIT] Cloud Function invoked")
+    print(f"[QUESTION] {request.args.get('question')}")
+    
+    # Check compliance
+    result = check_compliance(request.args.get('question'))
+    
+    return result, 200
+
+except Exception as e:
+    print(f"[ERROR] {str(e)}")
+    return {"error": str(e)}, 500
+
