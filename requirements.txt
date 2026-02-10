@@ -1,7 +1,4 @@
 streamlit
-requests
-google-cloud-discoveryengine
-google-cloud-aiplatform==1.42.0
-vertexai==1.42.0
-functions-framework
-rich<14
+google-cloud-aiplatform>=1.38
+langchain
+langchain-google-vertexai
