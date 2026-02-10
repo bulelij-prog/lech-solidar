@@ -1,4 +1,2 @@
 streamlit
 google-cloud-aiplatform>=1.38
-langchain
-langchain-google-vertexai
