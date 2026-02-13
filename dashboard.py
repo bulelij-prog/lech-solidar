@@ -4,15 +4,16 @@ import json
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
+# CONFIGURATION
 PROJECT_ID = "syndicat-novembre-2025"
 LOCATION = "us-central1" 
 
-# Liste mise à jour avec les noms techniques des modèles récents
+# LISTE TECHNIQUE DES MODÈLES (incluant les versions preview)
 MODELS_TO_TRY = [
-    "gemini-1.5-pro-002",  # Version stable la plus récente
+    "gemini-1.5-pro-002",
     "gemini-1.5-pro",
     "gemini-1.5-flash",
-    "gemini-1.0-pro"
+    "gemini-pro-experimental"  # Équivalent API pour Gemini 3 Preview
 ]
 
 st.set_page_config(page_title="NExUS v2.5", layout="wide")
@@ -26,7 +27,6 @@ def get_creds():
     except:
         return None
 
-# Initialisation directe sans boucle de test (pour éviter les blocages de cache)
 creds = get_creds()
 if creds:
     vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=creds)
@@ -36,7 +36,7 @@ with st.sidebar:
     if creds:
         st.success("✅ Authentification OK")
     else:
-        st.error("❌ Erreur de secrets")
+        st.error("❌ Secrets manquants")
 
 st.title("🤖 NExUS v2.5")
 
@@ -53,7 +53,6 @@ if prompt:
     with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # On essaie de générer en bouclant sur les modèles ici
         success = False
         for model_name in MODELS_TO_TRY:
             try:
@@ -64,9 +63,9 @@ if prompt:
                 st.info(f"Répondu par : {model_name}")
                 success = True
                 break
-            except Exception as e:
+            except:
                 continue
         
         if not success:
-            st.error("Désolé, aucun modèle ne répond. Google bloque l'accès API pour ce projet.")
-            st.warning("Vérifiez l'onglet 'Facturation' (Billing) dans votre console Google Cloud.")
+            st.error("Désolé, aucun modèle ne répond via l'API.")
+            st.warning("Action finale requise : Allez dans la Console GCP > IAM > Quotas et vérifiez que 'Generate Content requests per minute' n'est pas à 0.")
