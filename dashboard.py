@@ -8,7 +8,7 @@ import streamlit as st
 import google.generativeai as genai
 import json
 from google.cloud import discoveryengine_v1
-from google.api_core.gapic_v1 import client_info as grpc_client_info
+from google.oauth2 import service_account
 from typing import Optional, List, Dict
 
 # ==================== PAGE CONFIG ====================
@@ -85,11 +85,12 @@ with st.sidebar:
         if gcp_json_ok:
             try:
                 gcp_json = json.loads(st.secrets.get("GCP_SERVICE_ACCOUNT_JSON"))
-                # Will test actual connection when user submits query
-                st.success("✅ GCP credentials: Valid JSON format")
+                # Test credential creation
+                credentials = service_account.Credentials.from_service_account_info(gcp_json)
+                st.success("✅ GCP credentials: Successfully created from JSON")
                 discovery_ok = True
             except Exception as e:
-                st.error(f"❌ GCP credentials parsing failed: {str(e)[:50]}")
+                st.error(f"❌ GCP credentials creation failed: {str(e)[:50]}")
         else:
             st.error("❌ Cannot test Discovery Engine: GCP JSON missing")
     except Exception as e:
@@ -167,46 +168,82 @@ Exemple 2: Si un protocole local dit "salaire minimum 2000€" mais la loi dit "
 
 def query_discovery_engine(query: str, project_id: str, datastore_id: str, location: str) -> List[Dict]:
     """
-    Interroge le Discovery Engine et retourne les documents pertinents.
+    Interroge le Discovery Engine avec authentification explicite via service account.
+    Utilise google.oauth2.service_account.Credentials pour créer le client.
     """
     try:
+        # 1. Get service account JSON from secrets
         gcp_json_str = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
         if not gcp_json_str:
+            st.error("❌ GCP_SERVICE_ACCOUNT_JSON secret not found")
             return []
         
-        gcp_json = json.loads(gcp_json_str)
+        # 2. Parse JSON to dict
+        try:
+            gcp_json = json.loads(gcp_json_str)
+        except json.JSONDecodeError as e:
+            st.error(f"❌ GCP_SERVICE_ACCOUNT_JSON parsing failed: {str(e)[:50]}")
+            return []
         
-        # Initialize Discovery Engine client
-        client = discoveryengine_v1.SearchServiceClient()
+        # 3. Create explicit credentials from service account info
+        try:
+            credentials = service_account.Credentials.from_service_account_info(gcp_json)
+            st.debug("✅ Service account credentials created successfully")
+        except Exception as e:
+            st.error(f"❌ Failed to create credentials: {str(e)[:100]}")
+            return []
         
-        # Build request
+        # 4. Initialize Discovery Engine client with explicit credentials
+        try:
+            client = discoveryengine_v1.SearchServiceClient(credentials=credentials)
+            st.debug("✅ Discovery Engine client initialized with credentials")
+        except Exception as e:
+            st.error(f"❌ Failed to initialize Discovery Engine client: {str(e)[:100]}")
+            return []
+        
+        # 5. Build serving config path
         serving_config = f"projects/{project_id}/locations/{location}/collections/default_collection/dataStores/{datastore_id}/servingConfigs/default_search"
         
+        st.debug(f"Query: {query}")
+        st.debug(f"Serving config: {serving_config}")
+        
+        # 6. Build search request
         request = discoveryengine_v1.SearchRequest(
             serving_config=serving_config,
             query=query,
             page_size=5,  # Top 5 results
         )
         
-        # Make request
-        response = client.search(request)
+        # 7. Execute search
+        try:
+            response = client.search(request)
+            st.debug(f"✅ Discovery Engine query successful. Results: {len(response.results)}")
+        except Exception as e:
+            st.error(f"❌ Discovery Engine search failed: {str(e)[:100]}")
+            return []
         
-        # Extract results
+        # 8. Extract document results
         documents = []
         if response.results:
             for result in response.results:
-                doc_info = {
-                    "title": result.document.struct_data.get("title", "Unknown") if result.document.struct_data else "Unknown",
-                    "snippet": result.document.struct_data.get("snippet", "")[:500] if result.document.struct_data else "",
-                    "content": result.document.struct_data.get("content", "")[:1000] if result.document.struct_data else "",
-                    "source_uri": result.document.struct_data.get("source_uri", "") if result.document.struct_data else "",
-                }
-                documents.append(doc_info)
+                try:
+                    struct_data = result.document.struct_data if result.document.struct_data else {}
+                    doc_info = {
+                        "title": struct_data.get("title", "Unknown"),
+                        "snippet": struct_data.get("snippet", "")[:500],
+                        "content": struct_data.get("content", "")[:1000],
+                        "source_uri": struct_data.get("source_uri", ""),
+                    }
+                    documents.append(doc_info)
+                except Exception as e:
+                    st.debug(f"⚠️ Error parsing document: {str(e)[:50]}")
+                    continue
         
+        st.debug(f"✅ Extracted {len(documents)} documents from response")
         return documents
     
     except Exception as e:
-        st.error(f"Discovery Engine error: {str(e)[:100]}")
+        st.error(f"❌ Unexpected error in query_discovery_engine: {str(e)[:100]}")
         return []
 
 
@@ -271,7 +308,7 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "sources" in message:
+        if "sources" in message and message["sources"]:
             with st.expander("📄 Sources"):
                 for source in message["sources"]:
                     st.markdown(f"- **{source['title']}**: {source['source_uri']}")
@@ -300,7 +337,7 @@ if user_input := st.chat_input("Posez votre question juridique..."):
     
     # Generate response
     with st.spinner("⚙️ Gemini is analyzing..."):
-        response_text = generate_response(user_input, rag_documents, model_choice)
+        response_text = generate_response(user_query, rag_documents, model_choice)
     
     # Display assistant response
     with st.chat_message("assistant"):
@@ -332,4 +369,4 @@ with col2:
 with col3:
     st.metric("Mode", "HYBRID RAG+GEMINI")
 
-st.caption("NEXUS v2.0 | Hybride Gemini + Discovery Engine | Hiérarchie belge + Règle de Faveur")
+st.caption("NEXUS v2.1 | Hybride Gemini + Discovery Engine (Fixed Auth) | Hiérarchie belge + Règle de Faveur")
