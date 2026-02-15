@@ -1,8 +1,6 @@
 """
-NExUS v2.5 - Dashboard Principal avec RAG intégré
-Utilise Vertex AI Discovery Engine pour les protocoles CHU Brugmann
-Hiérarchie des normes: Loi > CCT > Protocole
-Temperature: 0.1 (rigueur maximale)
+NExUS v2.5 - Dashboard RAG avec Vertex AI Discovery Engine
+Région EU - Hiérarchie des normes belges - Règle de faveur
 """
 
 import streamlit as st
@@ -16,32 +14,47 @@ from vertexai.generative_models import GenerativeModel
 from google.cloud import discoveryengine_v1
 from google.cloud.discoveryengine_v1.services.search_service import SearchServiceClient
 
+# Configuration logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ================================================================
-# CONFIGURATION
+# CONFIGURATION - RÉGION EU
 # ================================================================
 
 st.set_page_config(
-        page_title="NExUS v2.5 - RAG Dashboard",
-        page_icon="⚖️",
-        layout="wide",
-        initial_sidebar_state="expanded"
+            page_title="NExUS v2.5 - Protocoles CHU Brugmann",
+            page_icon="⚖️",
+            layout="wide",
+            initial_sidebar_state="expanded"
 )
 
-# Configuration Discovery Engine
+# Configuration Discovery Engine - RÉGION EUROPE
 PROJECT_ID = "syndicat-novembre-2025"
-LOCATION = "global"
+LOCATION = "eu"  # 🇪🇺 RÉGION EUROPE
 DATA_STORE_ID = "nexus-cgsp-pdf-global"
 HOSPITAL_FILTER = "iris_brugmann"
 
-# Hiérarchie des normes (ordre de priorité)
+# Hiérarchie des normes belges
 DOC_TYPE_HIERARCHY = {
-        "Loi": 3,
-        "CCT": 2,
-        "Protocole": 1
+            "Loi": 3,
+            "CCT": 2,
+            "Protocole": 1
 }
+
+# Prompt système - Règle de faveur
+SYSTEM_PROMPT = """Tu es NExUS, assistant juridique expert pour les délégués syndicaux du CHU Brugmann.
+
+🔴 RÈGLES ABSOLUES (application stricte):
+1. ⚖️ RÈGLE DE FAVEUR: En cas de doute, interprète TOUJOURS en faveur du travailleur/délégué
+2. 🇧🇪 HIÉRARCHIE BELGE: Loi > CCT > Protocole (applique cet ordre d'interprétation)
+3. 📋 SOURCES: Cite obligatoirement [DOC-1], [DOC-2] etc. 
+4. ❌ PAS D'INVENTION: Réponds UNIQUEMENT basé sur les documents fournis
+5. 💯 PRÉCISION: Zéro hallucination, rigueur maximale
+
+Si l'information n'est pas dans les documents, dis-le clairement.
+Structure ta réponse avec titres, listes à puces, références explicites.
+"""
 
 # ================================================================
 # INITIALISATION VERTEX AI
@@ -49,21 +62,21 @@ DOC_TYPE_HIERARCHY = {
 
 @st.cache_resource
 def initialize_vertex_ai():
-        """Initialise Vertex AI avec Service Account"""
-        try:
-                    service_account_json = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
-                    if not service_account_json:
-                                    st.error("❌ Erreur: GCP_SERVICE_ACCOUNT_JSON non configuré")
-                                    st.stop()
+            """Initialise Vertex AI avec Service Account"""
+            try:
+                            service_account_json = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
+                            if not service_account_json:
+                                                st.error("❌ GCP_SERVICE_ACCOUNT_JSON manquant")
+                                                st.stop()
 
-                    credentials_dict = json.loads(service_account_json)
-                    credentials = service_account.Credentials.from_service_account_info(
-                        credentials_dict
-                    )
+                            credentials_dict = json.loads(service_account_json)
+                            credentials = service_account.Credentials.from_service_account_info(
+                                credentials_dict
+                            )
 
         project_id = credentials_dict.get("project_id")
-            if not project_id:
-                            st.error("❌ Impossible de récupérer le project_id")
+        if not project_id:
+                            st.error("❌ project_id introuvable")
                             st.stop()
 
         vertexai.init(project=project_id, credentials=credentials)
@@ -75,150 +88,134 @@ except Exception as e:
 
 
 @st.cache_resource
-def initialize_discovery_engine():
-        """Initialise le client Discovery Engine"""
-    try:
-                return SearchServiceClient()
+def get_search_client():
+            """Retourne le client Discovery Engine"""
+            try:
+                            return SearchServiceClient()
 except Exception as e:
-        logger.error(f"Erreur Discovery Engine: {str(e)}")
+        logger.error(f"Erreur SearchServiceClient: {str(e)}")
         return None
 
 
 # ================================================================
-# MOTEUR RAG INTÉGRÉ
+# MOTEUR RAG - RECHERCHE DANS LE DATA STORE
 # ================================================================
 
 def search_datastore(
-        query: str,
-        doc_type_filter: Optional[str] = None,
-        max_results: int = 5
+            query: str,
+            doc_type_filter: Optional[str] = None,
+            max_results: int = 5
 ) -> Tuple[List[Dict], str]:
-        """
-            Recherche sémantique dans le Data Store avec hiérarchie des normes
+            """
+                Recherche sémantique avec hiérarchie des normes
+                    Région: EU
+                        Filtre: hopital_id = iris_brugmann
+                            """
+            try:
+                            client = get_search_client()
+                            if not client:
+                                                return [], "Erreur: Client Discovery Engine indisponible"
 
-                    Hiérarchie:
-                        1. Loi (priorité 3)
-                            2. CCT (priorité 2)
-                                3. Protocole (priorité 1)
+                            # Chemin de la ressource
+                            serving_config = (
+                    f"projects/{PROJECT_ID}/locations/{LOCATION}/"
+                                                f"collections/default_collection/dataStores/{DATA_STORE_ID}"
+                            )
 
-                                        Args:
-                                                query: Question utilisateur
-                                                        doc_type_filter: Filtre optionnel (Loi, CCT, Protocole)
-                                                                max_results: Nombre max de documents
-
-                                                                            Returns:
-                                                                                    Tuple[List[Dict], str]: (documents triés, contexte formaté)
-                                                                                        """
-    try:
-                client = initialize_discovery_engine()
-                if not client:
-                                return [], ""
-
-                # Construction de la requête
-                search_config = f"projects/{PROJECT_ID}/locations/{LOCATION}/collections/default_collection/dataStores/{DATA_STORE_ID}"
-
+        # Filtre
         filter_str = f'hospital_id = "{HOSPITAL_FILTER}"'
         if doc_type_filter:
-                        filter_str += f' AND doc_type = "{doc_type_filter}"'
+                            filter_str += f' AND doc_type = "{doc_type_filter}"'
 
+        # Requête
         request = discoveryengine_v1.SearchRequest(
-                        serving_config=search_config,
-                        query=query,
-                        page_size=max_results,
-                        filter=filter_str,
-                        content_search_spec={
-                                            "snippet_spec": {
-                                                                    "max_snippet_length": 500,
-                                                                    "reference_only": False,
-                                            },
-                                            "summary_spec": {
-                                                                    "summary_result_count": 5,
-                                                                    "use_semantic_chunks": True,
-                                            },
-                        },
+                            serving_config=serving_config,
+                            query=query,
+                            page_size=max_results,
+                            filter=filter_str,
+                            content_search_spec={
+                                                    "snippet_spec": {
+                                                                                "max_snippet_length": 500,
+                                                                                "reference_only": False,
+                                                    },
+                                                    "summary_spec": {
+                                                                                "summary_result_count": 5,
+                                                                                "use_semantic_chunks": True,
+                                                    },
+                            },
         )
 
         response = client.search(request)
 
-        # Extraction et tri selon la hiérarchie
+        # Extraction
         documents = []
         for result in response.results:
-                        doc = result.document
-                        struct_data = doc.struct_data if hasattr(doc, 'struct_data') else {}
-
-            filename = struct_data.get('file_name', 'Sans titre')
-            doc_type = struct_data.get('doc_type', 'Protocole')  # Protocole par défaut
-            snippet = result.snippet.snippet_status if hasattr(result, 'snippet') else ""
+                            doc = result.document
+                            struct_data = doc.struct_data if hasattr(doc, 'struct_data') else {}
 
             doc_entry = {
-                                'filename': filename,
-                                'doc_type': doc_type,
-                                'url': doc.uri if hasattr(doc, 'uri') else "",
-                                'snippet': snippet,
-                                'relevance_score': result.relevance_score if hasattr(result, 'relevance_score') else 0.0,
-                                'hierarchy_priority': DOC_TYPE_HIERARCHY.get(doc_type, 0)
+                                    'filename': struct_data.get('file_name', 'Sans titre'),
+                                    'doc_type': struct_data.get('doc_type', 'Protocole'),
+                                    'url': doc.uri if hasattr(doc, 'uri') else "",
+                                    'snippet': result.snippet.snippet_status if hasattr(result, 'snippet') else "",
+                                    'relevance_score': getattr(result, 'relevance_score', 0.0),
+                                    'hierarchy_priority': DOC_TYPE_HIERARCHY.get(
+                                                                struct_data.get('doc_type', 'Protocole'), 0
+                                    )
             }
             documents.append(doc_entry)
 
-        # TRI par hiérarchie (Loi > CCT > Protocole) puis pertinence
+        # TRI: Hiérarchie > Pertinence
         documents.sort(
-                        key=lambda x: (-x['hierarchy_priority'], -x['relevance_score'])
+                            key=lambda x: (-x['hierarchy_priority'], -x['relevance_score'])
         )
 
-        # Construction du contexte
-        context = "## 📚 CONTEXTE - Documents CHU Brugmann\n\n---\n"
+        # Context formaté
+        context = "## 📚 DOCUMENTS PERTINENTS (Hiérarchie belge appliquée)\n---\n"
         for idx, doc in enumerate(documents, 1):
-                        context += f"""
-                        **{idx}. [{doc['doc_type'].upper()}] {doc['filename']}**
-                        📊 Pertinence: {doc['relevance_score']:.1%}
-                        📌 Contenu: {doc['snippet'][:300]}...
-                        """
-                    context += "---\n"
+                            context += f"\n**[DOC-{idx}] {doc['filename']}** ({doc['doc_type']})\n"
+                            context += f"• Pertinence: {doc['relevance_score']:.0%}\n"
+                            context += f"• Contenu: {doc['snippet'][:400]}...\n"
+                        context += "\n---\n"
 
-        logger.info(f"✓ Recherche: {len(documents)} docs trouvés (Loi={sum(1 for d in documents if d['doc_type']=='Loi')}, CCT={sum(1 for d in documents if d['doc_type']=='CCT')}, Protocole={sum(1 for d in documents if d['doc_type']=='Protocole')})")
-
+        logger.info(f"✓ {len(documents)} docs trouvés")
         return documents, context
 
 except Exception as e:
-        logger.error(f"❌ Erreur recherche: {str(e)}")
-        return [], ""
+        logger.error(f"❌ Erreur search_datastore: {str(e)}")
+        return [], f"Erreur recherche: {str(e)}"
 
 
 def call_gemini_with_rag(
-        prompt: str,
-        model_name: str,
-        rag_context: str,
-        documents: list
+            prompt: str,
+            model_name: str,
+            rag_context: str
 ) -> str:
-        """
-            Appelle Gemini avec augmentation RAG
-                Temperature: 0.1 pour rigueur maximale
-                    """
+            """
+                Appelle Gemini avec RAG + Règle de faveur
+                    Temperature: 0.1
+                        """
     try:
-                augmented_prompt = f"""{rag_context}
+                    augmented_prompt = f"""{SYSTEM_PROMPT}
 
-                ## 📋 QUESTION UTILISATEUR
-                {prompt}
+                    {rag_context}
 
-                ## 📌 INSTRUCTIONS STRICTES
-                - ⚖️ RÈGLE DE FAVEUR: Interprète toujours en faveur du travailleur/délégué
-                - Cite OBLIGATOIREMENT tes sources (doc numéro et type)
-                - Réponds UNIQUEMENT basé sur les documents ci-dessus
-                - Si l'information n'existe pas, dis-le clairement
-                - Structure: Titres, listes, références explicites
-                - Référence les documents avec [DOC-1], [DOC-2], etc.
-                """
+                    ## 📌 QUESTION
+                    {prompt}
+
+                    ⚠️ Rappel: Applique la RÈGLE DE FAVEUR et la HIÉRARCHIE BELGE.
+                    """
 
         model = GenerativeModel(model_name=model_name)
         response = model.generate_content(
-                        augmented_prompt,
-                        generation_config={
-                                            "max_output_tokens": 2048,
-                                            "temperature": 0.1,  # RIGUEUR MAXIMALE
-                        }
+                            augmented_prompt,
+                            generation_config={
+                                                    "max_output_tokens": 2048,
+                                                    "temperature": 0.1,
+                            }
         )
 
-        return response.text if response.text else "Pas de réponse disponible"
+        return response.text if response.text else "Pas de réponse"
 
 except Exception as e:
         logger.error(f"Erreur Gemini: {str(e)}")
@@ -229,145 +226,103 @@ except Exception as e:
 # INITIALISATION
 # ================================================================
 
-project_id, credentials = initialize_vertex_ai()
-st.success(f"✓ Vertex AI initialisé - Projet: {project_id}")
+project_id, _ = initialize_vertex_ai()
 
 # ================================================================
-# INTERFACE PRINCIPALE
+# UI - INTERFACE PRINCIPALE
 # ================================================================
 
-st.title("⚖️ NExUS v2.5 - RAG Dashboard")
-st.markdown("**Assistant IA Expert - Secteur Aide aux Personnes | CHU Brugmann**")
-st.markdown("*Hiérarchie des normes: Loi > CCT > Protocole | Temperature: 0.1 (Rigueur)*")
+st.title("⚖️ NExUS v2.5")
+st.markdown("**Assistant juridique - Protocoles CHU Brugmann**")
+st.markdown(f"🇪🇺 Région: EU | 📊 Projet: {project_id}")
 st.divider()
 
-# SIDEBAR - Configuration
+# SIDEBAR
 with st.sidebar:
-        st.header("⚙️ Configuration RAG")
+            st.header("⚙️ Configuration")
 
-    model_choice = st.selectbox(
-                "Modèle Gemini:",
-                ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-                index=0
+    model = st.selectbox(
+                    "Modèle Gemini:",
+                    ["gemini-2.0-flash", "gemini-1.5-pro"],
+                    index=0
     )
 
     st.divider()
+    st.subheader("🔍 Recherche")
 
-    st.subheader("🔍 Filtres Recherche")
-
-    doc_type = st.selectbox(
-                "Type de document:",
-                ["Tous", "Loi", "CCT", "Protocole"],
-                index=0
+    doc_filter = st.selectbox(
+                    "Filtrer par type:",
+                    ["Tous", "Loi", "CCT", "Protocole"],
+                    index=0
     )
-    doc_type_filter = None if doc_type == "Tous" else doc_type
+    doc_type = None if doc_filter == "Tous" else doc_filter
 
-    max_results = st.slider(
-                "Nombre de documents:",
-                min_value=1,
-                max_value=10,
-                value=5
-    )
+    max_docs = st.slider("Docs à consulter:", 1, 10, 5)
 
     st.divider()
-    st.info(f"📊 Projet: `{project_id}`")
-    st.info("🔒 Temperature: **0.1** (Rigueur maximale)")
-    st.info("📋 Règle de faveur: Appliquée")
+    st.info("⚖️ **Règle de faveur**: ACTIVE")
+    st.info("🇧🇪 **Hiérarchie**: Loi > CCT > Protocole")
+    st.info("🔒 **Temperature**: 0.1 (Rigueur)")
 
-# ZONE PRINCIPALE
-col1, col2 = st.columns([2, 1])
+# ZONE CHAT
+st.subheader("💬 Posez votre question")
 
-with col1:
-        st.subheader("💬 Assistant RAG + Gemini")
+# Historique
+if "messages" not in st.session_state:
+            st.session_state.messages = []
 
-    prompt = st.text_area(
-                "Posez votre question juridique:",
-                placeholder="Ex: Quels sont mes droits de formation professionnelle?",
-                height=150,
-                key="user_prompt"
-    )
+# Afficher historique
+for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                            st.markdown(msg["content"])
 
-    if st.button("🔍 Rechercher & Analyser", use_container_width=True):
-                if prompt.strip():
-                                with st.spinner("⏳ Recherche dans les protocoles..."):
-                                                    # ÉTAPE 1: Recherche RAG
-                                                    documents, rag_context = search_datastore(
-                                                                            query=prompt,
-                                                                            doc_type_filter=doc_type_filter,
-                                                                            max_results=max_results
-                                                    )
+# Chat input
+user_input = st.chat_input(
+            "Ex: Quels sont mes droits de formation professionnelle?",
+            key="chat_input"
+)
 
-                if documents:
-                                        st.success(f"✓ {len(documents)} documents trouvés")
+if user_input:
+            # Ajouter à l'historique
+            st.session_state.messages.append({"role": "user", "content": user_input})
 
-                    # Affiche la distribution par type
-                                        doc_counts = {}
-                                        for doc in documents:
-                                                                    doc_counts[doc['doc_type']] = doc_counts.get(doc['doc_type'], 0) + 1
+    with st.chat_message("user"):
+                    st.markdown(user_input)
 
-                                        type_str = " | ".join([f"{dtype}: {count}" for dtype, count in sorted(doc_counts.items(), key=lambda x: -DOC_TYPE_HIERARCHY.get(x[0], 0))])
-                                        st.caption(f"Distribution: {type_str}")
+    # Recherche + Analyse
+    with st.chat_message("assistant"):
+                    with st.spinner("🔍 Recherche dans les protocoles..."):
+                                        documents, rag_context = search_datastore(
+                                                                query=user_input,
+                                                                doc_type_filter=doc_type,
+                                                                max_results=max_docs
+                                        )
 
-                    with st.spinner("⏳ Gemini analyse (température: 0.1)..."):
-                                                # ÉTAPE 2: Appel Gemini
-                                                response = call_gemini_with_rag(
-                                                                                prompt=prompt,
-                                                                                model_name=model_choice,
-                                                                                rag_context=rag_context,
-                                                                                documents=documents
-                                                )
+                    if documents:
+                                        with st.spinner("⏳ Analyse (Gemini, Règle de faveur)..."):
+                                                                response = call_gemini_with_rag(
+                                                                                            prompt=user_input,
+                                                                                            model_name=model,
+                                                                                            rag_context=rag_context
+                                                                )
 
-                        st.success("✓ Analyse complète")
+                                        st.markdown(response)
+
+            # Sources
                         st.markdown("---")
-                        st.write(response)
+            st.subheader("📚 Sources consultées")
 
-                        # AFFICHAGE DES SOURCES
-                        st.markdown("---")
-                        st.subheader("📚 Sources consultées")
+            for idx, doc in enumerate(documents, 1):
+                                    icon = "⚖️" if doc['doc_type'] == "Loi" else "📋" if doc['doc_type'] == "CCT" else "📄"
+                                    st.markdown(
+                                        f"{icon} **[DOC-{idx}]** {doc['filename']} "
+                                        f"*({doc['doc_type']})* — {doc['relevance_score']:.0%}"
+                                    )
 
-                        for idx, doc in enumerate(documents, 1):
-                                                        icon = "⚖️" if doc['doc_type'] == "Loi" else "📋" if doc['doc_type'] == "CCT" else "📄"
-                                                        st.markdown(
-                                                            f"{icon} **[DOC-{idx}] {doc['filename']}** "
-                                                            f"({doc['doc_type']}) - Pertinence: {doc['relevance_score']:.0%}"
-                                                        )
-
-                        # Sauvegarde historique
-                        if "chat_history" not in st.session_state:
-                                                        st.session_state.chat_history = []
-
-                        st.session_state.chat_history.append({
-                                                        "prompt": prompt,
-                                                        "response": response,
-                                                        "sources": [f"[DOC-{i}] {d['filename']}" for i, d in enumerate(documents, 1)],
-                                                        "timestamp": datetime.now().strftime("%H:%M:%S")
-                        })
+            # Sauvegarde
+            st.session_state.messages.append({"role": "assistant", "content": response})
 else:
-                    st.warning("⚠️ Aucun document trouvé pour cette recherche")
-else:
-            st.warning("⚠️ Veuillez entrer une question")
-
-with col2:
-        st.subheader("📈 Stats")
-    st.metric("Modèle", model_choice.split("-")[1])
-    st.metric("Temperature", "0.1")
-    st.metric("Timestamp", datetime.now().strftime("%H:%M:%S"))
-    st.metric("Max Docs", max_results)
-    st.metric("Règle faveur", "✓ Active")
-
-# HISTORIQUE
-st.divider()
-st.subheader("📝 Historique")
-
-if "chat_history" in st.session_state and st.session_state.chat_history:
-        for i, entry in enumerate(st.session_state.chat_history, 1):
-                    with st.expander(f"Interaction {i}: {entry['prompt'][:50]}..."):
-                                    st.write(f"**Q:** {entry['prompt']}")
-                                    st.write(f"**R:** {entry['response']}")
-                                    st.write(f"**Sources:** {', '.join(entry['sources'])}")
-                                    st.caption(f"⏰ {entry['timestamp']}")
-else:
-    st.info("Aucune interaction pour le moment")
+            st.warning("⚠️ Aucun document trouvé")
 
 st.divider()
-st.caption("NExUS v2.5 | RAG + Gemini 2.0 Flash | Hiérarchie des normes | Règle de faveur")
+st.caption("NExUS v2.5 | Région EU | Hiérarchie belge | Règle de faveur")
