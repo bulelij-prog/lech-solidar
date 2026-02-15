@@ -1,6 +1,6 @@
 """
 NExUS v2.5 — dashboard.py
-Version stable : Google AI Studio
+Version Finale Corrigée (Google AI Studio)
 """
 
 import streamlit as st
@@ -18,51 +18,50 @@ st.set_page_config(
 # ==========================================
 # INSTRUCTIONS SYSTÈME (Personnalité)
 # ==========================================
-SYSTEM_INSTRUCTION = """Tu es NExUS, l'assistant juridique expert de la délégation CGSP ALR (secteur Aide aux Personnes).
-Ton rôle est d'aider les délégués et les agents en analysant les conventions collectives, le droit du travail belge et les notes de service.
+SYSTEM_INSTRUCTION = """Tu es NExUS, l'assistant juridique expert de la délégation CGSP ALR.
+Ton rôle est d'aider les délégués en analysant les conventions collectives et le droit du travail.
 
-Règles de réponse :
-1. Sois toujours précis et cite tes sources (articles de loi, numéros de CCT).
-2. Utilise un ton professionnel, solidaire et pédagogique.
-3. Si une information est manquante pour répondre avec certitude, demande des précisions.
-4. Structure tes réponses avec des titres et des listes à puces pour la clarté.
+Règles :
+1. Sois précis et cite tes sources.
+2. Structure tes réponses avec des titres et des listes.
+3. Si tu n'es pas sûr, dis-le clairement.
 """
 
 # ==========================================
-# BARRE LATÉRALE - DIAGNOSTIC & STATUS
+# BARRE LATÉRALE - DIAGNOSTIC
 # ==========================================
 with st.sidebar:
     st.title("🛡️ Contrôle NExUS")
     st.caption("Délégation CGSP ALR")
     st.divider()
 
-    # Vérification de la Clé API
     st.subheader("📊 Status du Système")
+    
+    # Vérification de la Clé dans les Secrets
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
-        # Affichage masqué pour sécurité
-        st.success(f"✅ Clé API détectée ({api_key[:4]}...{api_key[-4:]})")
+        st.success(f"✅ Clé API détectée")
         
         try:
+            # Configuration de l'API
             genai.configure(api_key=api_key)
+            
+            # Utilisation de gemini-1.5-flash pour éviter l'erreur 404
             model = genai.GenerativeModel(
-                model_name="gemini-1.5-pro",
+                model_name="gemini-1.5-flash",
                 system_instruction=SYSTEM_INSTRUCTION
             )
-            st.info("🤖 Modèle : Gemini 1.5 Pro")
+            st.info("🤖 Modèle : Gemini 1.5 Flash")
             st.success("🟢 SYSTÈME OPÉRATIONNEL")
         except Exception as e:
             st.error(f"❌ Erreur config : {e}")
+            st.stop()
     else:
-        st.error("❌ GOOGLE_API_KEY manquante dans les Secrets")
+        st.error("❌ GOOGLE_API_KEY manquante dans Streamlit Secrets")
         st.stop()
 
-    st.divider()
-    st.markdown("### 💡 Aide rapide")
-    st.info("Si l'IA ne répond pas, vérifiez vos quotas sur Google AI Studio.")
-
 # ==========================================
-# INTERFACE DE CHAT PRINCIPALE
+# INTERFACE DE CHAT
 # ==========================================
 st.title("⚖️ NExUS v2.5")
 st.markdown("### *Assistant IA Expert - Secteur Aide aux Personnes*")
@@ -86,23 +85,23 @@ if prompt := st.chat_input("Posez votre question juridique ou syndicale..."):
 
     # Génération de la réponse
     with st.chat_message("assistant"):
-        with st.spinner("⚖️ NExUS analyse la base juridique..."):
+        with st.spinner("⚖️ Analyse en cours..."):
             try:
-                # Appel à l'API Gemini
+                # Appel sécurisé au modèle
                 response = model.generate_content(prompt)
-                full_response = response.text
                 
-                st.markdown(full_response)
-                
-                # Sauvegarder la réponse
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": full_response
-                })
+                if response.text:
+                    st.markdown(response.text)
+                    st.session_state.messages.append({
+                        "role": "assistant", 
+                        "content": response.text
+                    })
+                else:
+                    st.warning("L'IA n'a pas pu générer de réponse. Vérifiez vos filtres de sécurité.")
+                    
             except Exception as e:
-                error_msg = f"Désolé, une erreur est survenue : {str(e)}"
-                st.error(error_msg)
+                st.error(f"❌ Erreur lors de la génération : {str(e)}")
 
 # Footer
 st.divider()
-st.caption("NExUS v2.5 | Outil interne CGSP ALR | Déployé via Google AI Studio")
+st.caption("NExUS v2.5 | CGSP ALR | Propulsé par Google AI Studio")
