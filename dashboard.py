@@ -1,72 +1,96 @@
+"""
+NExUS v2.5 - Dashboard Principal
+Utilise Vertex AI avec Service Account pour l'authentification Gemini
+"""
+
 import streamlit as st
 import json
-import google.auth
+import pandas as pd
+from datetime import datetime
 from google.oauth2 import service_account
-from google.auth.transport.requests import Request
-from vertexai.generative_models import GenerativeModel
 import vertexai
+from vertexai.generative_models import GenerativeModel
 
 # ============================================================
-# INITIALISATION DU CLIENT VERTEX AI AVEC SERVICE ACCOUNT
+# CONFIGURATION STREAMLIT
 # ============================================================
 
+st.set_page_config(
+    page_title="NExUS v2.5 - Dashboard",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================
+# INITIALISATION VERTEX AI AVEC SERVICE ACCOUNT
+# ============================================================
+
+@st.cache_resource
 def initialize_vertex_ai():
     """
-    Initialise Vertex AI en utilisant les credentials du Service Account
+    Initialise Vertex AI avec les credentials du Service Account
     stockées dans les secrets Streamlit.
+    
+    Returns:
+        tuple: (project_id, credentials)
     """
-    # Récupère le JSON du service account depuis les secrets
-    service_account_json = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
+    try:
+        # Récupère le JSON du service account depuis les secrets
+        service_account_json = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
+        
+        if not service_account_json:
+            st.error("❌ Erreur: Le secret GCP_SERVICE_ACCOUNT_JSON n'est pas configuré")
+            st.error("Ajoute-le dans Streamlit Secrets avec le contenu de ta clé JSON")
+            st.stop()
+        
+        # Parse le JSON
+        try:
+            credentials_dict = json.loads(service_account_json)
+        except json.JSONDecodeError:
+            st.error("❌ Erreur: GCP_SERVICE_ACCOUNT_JSON n'est pas un JSON valide")
+            st.stop()
+        
+        # Crée les credentials
+        credentials = service_account.Credentials.from_service_account_info(
+            credentials_dict
+        )
+        
+        # Récupère le project ID
+        project_id = credentials_dict.get("project_id")
+        
+        if not project_id:
+            st.error("❌ Erreur: Impossible de récupérer le project_id")
+            st.stop()
+        
+        # Initialise Vertex AI
+        vertexai.init(project=project_id, credentials=credentials)
+        
+        return project_id, credentials
     
-    if not service_account_json:
-        st.error("❌ Le secret GCP_SERVICE_ACCOUNT_JSON n'est pas configuré dans Streamlit Secrets")
+    except Exception as e:
+        st.error(f"❌ Erreur d'initialisation Vertex AI: {str(e)}")
         st.stop()
-    
-    # Crée les credentials à partir du JSON
-    credentials = service_account.Credentials.from_service_account_info(
-        json.loads(service_account_json)
-    )
-    
-    # Récupère le project ID depuis le JSON
-    project_id = json.loads(service_account_json).get("project_id")
-    
-    if not project_id:
-        st.error("❌ Impossible de récupérer le project_id du service account")
-        st.stop()
-    
-    # Initialise Vertex AI avec le project et les credentials
-    vertexai.init(project=project_id, credentials=credentials)
-    
-    return project_id, credentials
-
-# Initialise Vertex AI au démarrage
-if "vertex_ai_initialized" not in st.session_state:
-    project_id, credentials = initialize_vertex_ai()
-    st.session_state.vertex_ai_initialized = True
-    st.session_state.project_id = project_id
-    st.session_state.credentials = credentials
 
 
 # ============================================================
-# FONCTION POUR APPELER L'API GEMINI
+# FONCTIONS POUR APPELER GEMINI
 # ============================================================
 
 def call_gemini_api(prompt: str, model_name: str = "gemini-2.0-flash") -> str:
     """
-    Appelle l'API Gemini via Vertex AI en utilisant le Service Account.
+    Appelle l'API Gemini via Vertex AI.
     
     Args:
         prompt (str): Le prompt à envoyer à Gemini
-        model_name (str): Le modèle à utiliser (défaut: gemini-2.0-flash)
+        model_name (str): Le modèle Gemini à utiliser
     
     Returns:
-        str: La réponse du modèle
+        str: La réponse du modèle ou None si erreur
     """
     try:
-        # Crée une instance du modèle Gemini
         model = GenerativeModel(model_name=model_name)
         
-        # Appelle le modèle avec les credentials du service account
         response = model.generate_content(
             prompt,
             generation_config={
@@ -78,60 +102,110 @@ def call_gemini_api(prompt: str, model_name: str = "gemini-2.0-flash") -> str:
         return response.text
     
     except Exception as e:
-        st.error(f"❌ Erreur lors de l'appel à Gemini: {str(e)}")
-        return None
+        return f"Erreur Gemini: {str(e)}"
 
 
 # ============================================================
-# EXEMPLE D'UTILISATION
+# INITIALISATION AU DÉMARRAGE
 # ============================================================
 
-if __name__ == "__main__":
-    st.title("NExUS v2.5 - Dashboard avec Vertex AI")
+# Initialise Vertex AI
+project_id, credentials = initialize_vertex_ai()
+
+# Message de confirmation
+st.success(f"✓ Vertex AI initialisé avec le projet: {project_id}")
+
+
+# ============================================================
+# INTERFACE STREAMLIT
+# ============================================================
+
+st.title("🚀 NExUS v2.5 - Dashboard")
+st.markdown("---")
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Configuration")
     
-    # Exemple simple
-    prompt = st.text_area("Entrez votre prompt:", "Bonjour, comment ça marche?")
+    model_choice = st.selectbox(
+        "Choisir le modèle Gemini:",
+        ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+    )
     
-    if st.button("Envoyer à Gemini"):
-        response = call_gemini_api(prompt)
-        if response:
-            st.success("✓ Réponse reçue")
-            st.write(response)
-```
+    temperature = st.slider(
+        "Température (créativité):",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.7,
+        step=0.1
+    )
+    
+    st.divider()
+    st.info(f"📊 Projet GCP: `{project_id}`")
 
----
 
-## Ce que ce code fait :
+# Section principale
+col1, col2 = st.columns([2, 1])
 
-1. **`initialize_vertex_ai()`** : 
-   - Récupère le JSON du service account depuis `st.secrets["GCP_SERVICE_ACCOUNT_JSON"]`
-   - Crée les credentials authentifiés
-   - Initialise Vertex AI avec le project_id et les credentials
-   - Retourne le project_id pour référence
+with col1:
+    st.subheader("💬 Testeur Gemini")
+    
+    prompt = st.text_area(
+        "Entrez votre prompt:",
+        placeholder="Posez une question ou donnez une tâche à Gemini...",
+        height=150
+    )
+    
+    if st.button("🔄 Envoyer à Gemini", use_container_width=True):
+        if prompt.strip():
+            with st.spinner("⏳ Gemini réfléchit..."):
+                response = call_gemini_api(prompt, model_name=model_choice)
+                
+                if response and not response.startswith("Erreur"):
+                    st.success("✓ Réponse reçue")
+                    st.markdown("---")
+                    st.write(response)
+                else:
+                    st.error(response)
+        else:
+            st.warning("⚠️ Veuillez entrer un prompt")
 
-2. **Initialisation au démarrage** :
-   - Utilise `st.session_state` pour initialiser Vertex AI une seule fois (pour les performances)
+with col2:
+    st.subheader("📈 Stats")
+    
+    st.metric(
+        "Modèle Actif",
+        model_choice.split("-")[1]
+    )
+    
+    st.metric(
+        "Température",
+        temperature
+    )
+    
+    st.metric(
+        "Timestamp",
+        datetime.now().strftime("%H:%M:%S")
+    )
 
-3. **`call_gemini_api(prompt)`** :
-   - Crée une instance de `GenerativeModel`
-   - Appelle le modèle Gemini
-   - Retourne la réponse ou une erreur
 
----
+# Section historique (optionnel)
+st.divider()
+st.subheader("📝 Historique")
 
-## ⚠️ Points importants :
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-**Avant de lancer l'app :**
+if st.session_state.chat_history:
+    for i, entry in enumerate(st.session_state.chat_history):
+        with st.expander(f"Interaction {i+1}: {entry['prompt'][:50]}..."):
+            st.write(f"**Prompt:** {entry['prompt']}")
+            st.write(f"**Réponse:** {entry['response']}")
+            st.caption(f"🕐 {entry['timestamp']}")
+else:
+    st.info("Aucune interaction pour le moment")
 
-1. **Ajoute le secret dans Streamlit Cloud** :
-   - Va dans : Paramètres de l'app → Secrets
-   - Ajoute une variable nommée : `GCP_SERVICE_ACCOUNT_JSON`
-   - Colle **tout le contenu JSON** du fichier `syndicat-novembre-2025-be7179c9846b.json` que tu as téléchargé
 
-2. **Assure-toi que les packages sont installés** dans `requirements.txt` :
-```
-   google-auth==2.26.0
-   google-auth-oauthlib==1.2.0
-   google-cloud-aiplatform==1.42.0
-   google-cloud-vertexai==1.42.0
-   streamlit==1.28.0
+# Footer
+st.divider()
+st.caption("NExUS v2.5 | Powered by Vertex AI + Streamlit")
