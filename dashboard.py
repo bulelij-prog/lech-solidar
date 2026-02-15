@@ -1,78 +1,108 @@
+"""
+NExUS v2.5 — dashboard.py
+Version stable : Google AI Studio
+"""
+
 import streamlit as st
-import base64
-import json
 import google.generativeai as genai
-import vertexai
-from vertexai.generative_models import GenerativeModel
-from google.oauth2 import service_account
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="NExUS v2.5", layout="wide")
+# ==========================================
+# CONFIGURATION DE LA PAGE
+# ==========================================
+st.set_page_config(
+    page_title="NExUS v2.5 - CGSP",
+    page_icon="⚖️",
+    layout="wide"
+)
 
-def get_config():
-    """Décode les secrets pour obtenir les credentials et la clé API."""
-    try:
-        if "GCP_CREDENTIALS_BASE64" not in st.secrets:
-            st.error("Le secret GCP_CREDENTIALS_BASE64 est manquant dans Streamlit.")
-            return None
-        b64_string = st.secrets["GCP_CREDENTIALS_BASE64"]
-        return json.loads(base64.b64decode(b64_string))
-    except Exception as e:
-        st.error(f"Erreur de configuration : {e}")
-        return None
+# ==========================================
+# INSTRUCTIONS SYSTÈME (Personnalité)
+# ==========================================
+SYSTEM_INSTRUCTION = """Tu es NExUS, l'assistant juridique expert de la délégation CGSP ALR (secteur Aide aux Personnes).
+Ton rôle est d'aider les délégués et les agents en analysant les conventions collectives, le droit du travail belge et les notes de service.
 
-config = get_config()
+Règles de réponse :
+1. Sois toujours précis et cite tes sources (articles de loi, numéros de CCT).
+2. Utilise un ton professionnel, solidaire et pédagogique.
+3. Si une information est manquante pour répondre avec certitude, demande des précisions.
+4. Structure tes réponses avec des titres et des listes à puces pour la clarté.
+"""
 
-# --- BARRE LATÉRALE ---
+# ==========================================
+# BARRE LATÉRALE - DIAGNOSTIC & STATUS
+# ==========================================
 with st.sidebar:
-    st.title("⚡ État du Système")
-    if config and "google_api_key" in config:
-        st.success("✅ Clé AI Studio détectée")
-        genai.configure(api_key=config["google_api_key"])
+    st.title("🛡️ Contrôle NExUS")
+    st.caption("Délégation CGSP ALR")
+    st.divider()
+
+    # Vérification de la Clé API
+    st.subheader("📊 Status du Système")
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        # Affichage masqué pour sécurité
+        st.success(f"✅ Clé API détectée ({api_key[:4]}...{api_key[-4:]})")
+        
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(
+                model_name="gemini-1.5-pro",
+                system_instruction=SYSTEM_INSTRUCTION
+            )
+            st.info("🤖 Modèle : Gemini 1.5 Pro")
+            st.success("🟢 SYSTÈME OPÉRATIONNEL")
+        except Exception as e:
+            st.error(f"❌ Erreur config : {e}")
     else:
-        st.warning("⚠️ Mode Vertex AI standard")
+        st.error("❌ GOOGLE_API_KEY manquante dans les Secrets")
+        st.stop()
 
-# --- INTERFACE PRINCIPALE ---
-st.title("🤖 NExUS v2.5")
-st.caption("Assistant Syndical CGSP - Aide aux Personnes")
+    st.divider()
+    st.markdown("### 💡 Aide rapide")
+    st.info("Si l'IA ne répond pas, vérifiez vos quotas sur Google AI Studio.")
 
+# ==========================================
+# INTERFACE DE CHAT PRINCIPALE
+# ==========================================
+st.title("⚖️ NExUS v2.5")
+st.markdown("### *Assistant IA Expert - Secteur Aide aux Personnes*")
+st.divider()
+
+# Initialisation de l'historique
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Affichage de l'historique
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# --- LOGIQUE DE CHAT ---
-prompt = st.chat_input("Posez votre question syndicale...")
-
-if prompt:
+# Zone de saisie
+if prompt := st.chat_input("Posez votre question juridique ou syndicale..."):
+    # Ajouter le message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Génération de la réponse
     with st.chat_message("assistant"):
-        response_text = ""
-        # TENTATIVE 1 : Google AI Studio (Rapide et sans quota GCP)
-        try:
-            model = genai.GenerativeModel('gemini-1.5-pro')
-            response = model.generate_content(prompt)
-            response_text = response.text
-            st.markdown(response_text)
-            st.info("💡 Répondu via Google AI Studio")
-        except Exception as e:
-            st.warning("AI Studio indisponible, tentative Vertex AI...")
-            # TENTATIVE 2 : Vertex AI
+        with st.spinner("⚖️ NExUS analyse la base juridique..."):
             try:
-                creds = service_account.Credentials.from_service_account_info(config)
-                vertexai.init(project=config["project_id"], location="us-central1", credentials=creds)
-                v_model = GenerativeModel("gemini-1.5-pro")
-                v_response = v_model.generate_content(prompt)
-                response_text = v_response.text
-                st.markdown(response_text)
-                st.info("💡 Répondu via Vertex AI")
-            except Exception as e2:
-                st.error(f"Erreur critique : {e2}")
+                # Appel à l'API Gemini
+                response = model.generate_content(prompt)
+                full_response = response.text
+                
+                st.markdown(full_response)
+                
+                # Sauvegarder la réponse
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": full_response
+                })
+            except Exception as e:
+                error_msg = f"Désolé, une erreur est survenue : {str(e)}"
+                st.error(error_msg)
 
-        if response_text:
-            st.session_state.messages.append({"role": "assistant", "content": response_text})
+# Footer
+st.divider()
+st.caption("NExUS v2.5 | Outil interne CGSP ALR | Déployé via Google AI Studio")
