@@ -1,9 +1,2 @@
-streamlit==1.40.1
-google-cloud-aiplatform==1.71.0
-google-auth==2.37.0
-google-auth-oauthlib==1.2.0
-google-auth-httplib2==0.2.0
-google-cloud-core==2.4.1
-google-generativeai
-google-cloud-aiplatform
-streamlit
+streamlit>=1.30.0
+google-generativeai>=0.3.0
