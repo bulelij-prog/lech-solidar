@@ -1,6 +1,2 @@
-# Plan B Ultra-Minimal Dependencies (NO Google Cloud packages)
 streamlit>=1.28.0
 google-generativeai>=0.3.0
-
-# Étape A: RAG Integration
-google-cloud-discoveryengine>=0.11.0
