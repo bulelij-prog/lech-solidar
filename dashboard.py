@@ -112,7 +112,7 @@ with st.sidebar:
         st.warning("Cannot select model: Gemini connection failed")
         model_choice = "gemini-2.0-flash"
 
-    # Discovery Engine parameters (fixed values, not editable)
+    # Discovery Engine parameters
     st.subheader("🔍 Discovery Engine Settings")
     project_id = "syndicat-novembre-2025"
     datastore_id = "nexus-cgsp-pdf-global"
@@ -155,42 +155,133 @@ Exemple 2: Si un protocole local dit "salaire minimum 2000€" mais la loi dit "
 """
 
 
+# ==================== HELPER: Extract best available text ====================
+
+def extract_document_data(result) -> Dict:
+    """
+    Extrait titre, contenu et source depuis un résultat Discovery Engine.
+    Stratégie en cascade: derived_struct_data → struct_data → document.name → document.id
+    """
+    doc = result.document
+
+    # --- Titre: cascade de fallbacks ---
+    title = "Unknown"
+
+    # Tentative 1: struct_data standard
+    if doc.struct_data:
+        title = (
+            doc.struct_data.get("title")
+            or doc.struct_data.get("name")
+            or doc.struct_data.get("filename")
+            or "Unknown"
+        )
+
+    # Tentative 2: derived_struct_data (extraits générés par Google pour les PDFs)
+    derived = {}
+    if doc.derived_struct_data:
+        derived = dict(doc.derived_struct_data)
+        if title == "Unknown":
+            title = (
+                derived.get("title")
+                or derived.get("name")
+                or "Unknown"
+            )
+
+    # Tentative 3: extraire le nom de fichier depuis doc.name (chemin GCS)
+    if title == "Unknown" and doc.name:
+        # doc.name ressemble à: projects/.../documents/abc123
+        # ou la source GCS est dans struct_data.source_uri
+        parts = doc.name.split("/")
+        title = parts[-1] if parts else doc.id or "Unknown"
+
+    # Tentative 4: utiliser l'ID du document comme titre de dernier recours
+    if title == "Unknown" and doc.id:
+        title = doc.id
+
+    # --- Contenu: cascade derived → struct ---
+    content = ""
+
+    # derived_struct_data contient souvent "extractive_answers" ou "snippets" pour les PDFs
+    if derived:
+        # Extraits de réponse (extractive_answers)
+        extractive_answers = derived.get("extractive_answers", [])
+        if extractive_answers:
+            content = " ".join([
+                a.get("content", "") for a in extractive_answers
+                if isinstance(a, dict)
+            ])[:1500]
+
+        # Snippets si pas d'extractive_answers
+        if not content:
+            snippets = derived.get("snippets", [])
+            if snippets:
+                content = " ".join([
+                    s.get("snippet", "") for s in snippets
+                    if isinstance(s, dict)
+                ])[:1500]
+
+        # Contenu brut dans derived
+        if not content:
+            content = derived.get("content", "")[:1500]
+
+    # Fallback: struct_data classique
+    if not content and doc.struct_data:
+        content = (
+            doc.struct_data.get("content", "")
+            or doc.struct_data.get("text", "")
+            or doc.struct_data.get("body", "")
+        )[:1500]
+
+    # --- Source URI ---
+    source_uri = ""
+    if doc.struct_data:
+        source_uri = doc.struct_data.get("source_uri", "") or doc.struct_data.get("uri", "")
+    if not source_uri and derived:
+        source_uri = derived.get("source_uri", "") or derived.get("link", "")
+    if not source_uri and doc.name:
+        source_uri = doc.name
+
+    return {
+        "title": title,
+        "content": content,
+        "snippet": content[:300],
+        "source_uri": source_uri,
+        "doc_id": doc.id or "",
+        "_raw_derived": derived,        # Gardé pour le debug temporaire
+        "_raw_struct": dict(doc.struct_data) if doc.struct_data else {},
+    }
+
+
 # ==================== FUNCTIONS ====================
 
 def query_discovery_engine(query: str, project_id: str, datastore_id: str, location: str) -> List[Dict]:
     """
     Interroge le Discovery Engine avec authentification explicite via service account.
-    FIX: st.debug() supprimé, credentials passés explicitement au client.
     """
     try:
-        # Step 1: Get JSON from secrets
         gcp_json_str = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
         if not gcp_json_str:
             st.error("❌ GCP_SERVICE_ACCOUNT_JSON secret not found")
             return []
 
-        # Step 2: Parse JSON
         try:
             gcp_json = json.loads(gcp_json_str)
         except json.JSONDecodeError as e:
             st.error(f"❌ GCP JSON parsing failed: {str(e)[:80]}")
             return []
 
-        # Step 3: Create credentials from service account info
         try:
             credentials = service_account.Credentials.from_service_account_info(gcp_json)
         except Exception as e:
             st.error(f"❌ Failed to create GCP credentials: {str(e)[:80]}")
             return []
 
-        # Step 4: Initialize client WITH explicit credentials (fixes 503 error)
         try:
             client = discoveryengine_v1.SearchServiceClient(credentials=credentials)
         except Exception as e:
             st.error(f"❌ Failed to initialize Discovery Engine client: {str(e)[:80]}")
             return []
 
-        # Step 5: Build serving config path
         serving_config = (
             f"projects/{project_id}"
             f"/locations/{location}"
@@ -199,7 +290,6 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
             f"/servingConfigs/default_search"
         )
 
-        # Step 6: Build and execute search request
         request = discoveryengine_v1.SearchRequest(
             serving_config=serving_config,
             query=query,
@@ -212,20 +302,43 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
             st.error(f"❌ Discovery Engine search failed: {str(e)[:100]}")
             return []
 
-        # Step 7: Extract results
         documents = []
         for result in response.results:
             try:
-                struct_data = result.document.struct_data if result.document.struct_data else {}
-                doc_info = {
-                    "title": struct_data.get("title", "Unknown"),
-                    "snippet": struct_data.get("snippet", "")[:500],
-                    "content": struct_data.get("content", "")[:1000],
-                    "source_uri": struct_data.get("source_uri", ""),
-                }
-                documents.append(doc_info)
-            except Exception:
+                doc_data = extract_document_data(result)
+                documents.append(doc_data)
+            except Exception as e:
+                st.warning(f"⚠️ Error parsing one document: {str(e)[:50]}")
                 continue
+
+        # ============================================================
+        # DEBUG TEMPORAIRE: Affiche la structure brute du 1er résultat
+        # Supprime ce bloc dès que les titres s'affichent correctement
+        # ============================================================
+        if response.results:
+            with st.expander("🔬 DEBUG - Structure brute du Document 1 (supprimer après diagnostic)", expanded=True):
+                first_result = response.results[0]
+                st.markdown("**`result.document` (objet complet):**")
+                st.write(first_result.document)
+                st.divider()
+                st.markdown("**`struct_data` (clés disponibles):**")
+                if first_result.document.struct_data:
+                    st.json(dict(first_result.document.struct_data))
+                else:
+                    st.warning("struct_data est vide")
+                st.divider()
+                st.markdown("**`derived_struct_data` (clés disponibles):**")
+                if first_result.document.derived_struct_data:
+                    st.json(dict(first_result.document.derived_struct_data))
+                else:
+                    st.warning("derived_struct_data est vide")
+                st.divider()
+                st.markdown("**`document.name` et `document.id`:**")
+                st.write(f"name: `{first_result.document.name}`")
+                st.write(f"id: `{first_result.document.id}`")
+        # ============================================================
+        # FIN DEBUG TEMPORAIRE
+        # ============================================================
 
         return documents
 
@@ -237,10 +350,8 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
 def generate_response(user_input: str, rag_documents: List[Dict], model_choice: str) -> str:
     """
     Génère une réponse Gemini avec contexte RAG.
-    FIX: paramètre renommé user_input pour cohérence avec l'appel.
     """
     try:
-        # Build context from RAG results
         if rag_documents:
             context = "\\n---\\n**DOCUMENTS PERTINENTS (Discovery Engine):**\\n"
             for i, doc in enumerate(rag_documents, 1):
@@ -252,7 +363,6 @@ def generate_response(user_input: str, rag_documents: List[Dict], model_choice: 
         else:
             context = "\\n---\\n**Aucun document trouvé dans le Data Store.**\\n"
 
-        # Build full prompt
         full_prompt = f"""{SYSTEM_PROMPT}
 
 ---
@@ -285,11 +395,9 @@ st.divider()
 st.header("💬 Assistant Juridique NEXUS")
 st.markdown("Posez vos questions sur le droit du travail belge. Le système recherche dans vos 520 protocoles et applique la règle de faveur.")
 
-# Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -298,38 +406,31 @@ for message in st.session_state.messages:
                 for source in message["sources"]:
                     st.markdown(f"- **{source['title']}**: {source['source_uri']}")
 
-# Chat input — FIX: variable nommée user_input partout, cohérence garantie
 if user_input := st.chat_input("Posez votre question juridique..."):
 
     if not all_ok:
         st.error("⚠️ System not fully configured. Check sidebar for issues.")
         st.stop()
 
-    # Add user message to history
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Query Discovery Engine
     with st.spinner("🔍 Searching Discovery Engine (520 protocoles)..."):
         rag_documents = query_discovery_engine(user_input, project_id, datastore_id, location)
 
-    # Generate Gemini response — FIX: user_input passé ici (plus user_query)
     with st.spinner("⚙️ Gemini analyse et applique la règle de faveur..."):
         response_text = generate_response(user_input, rag_documents, model_choice)
 
-    # Display assistant response
     with st.chat_message("assistant"):
         st.markdown(response_text)
 
-    # Store in session history
     st.session_state.messages.append({
         "role": "assistant",
         "content": response_text,
         "sources": rag_documents
     })
 
-    # Show RAG context in expander
     if rag_documents:
         with st.expander(f"📊 RAG Context ({len(rag_documents)} documents trouvés)"):
             for i, doc in enumerate(rag_documents, 1):
@@ -348,4 +449,4 @@ with col2:
 with col3:
     st.metric("Mode", "HYBRID RAG+GEMINI")
 
-st.caption("NEXUS v2.2 | Hybride Gemini + Discovery Engine | Hiérarchie belge + Règle de Faveur")
+st.caption("NEXUS v2.3 | Hybride Gemini + Discovery Engine | Hiérarchie belge + Règle de Faveur")
