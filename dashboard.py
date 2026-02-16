@@ -246,6 +246,12 @@ def query_all_discovery_engines(query, credentials):
     return results_pdf + results_web
 
 # ==================== SOURCE B: BIGQUERY (CCT) ====================
+def clean_word(w):
+    result = w.lower()
+    for ch in [".", ",", ";", ":", "?", "!", "(", ")", '"', "'"]:
+        result = result.replace(ch, "")
+    return result
+
 def query_bigquery_cct(query, credentials):
     try:
         client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
@@ -257,7 +263,7 @@ def query_bigquery_cct(query, credentials):
             "salaire": ["salaire", "remuneration", "bareme", "taux"]
         }
 
-        raw_words = [w.strip('.,;:?!"\\'()').lower() for w in query.split() if len(w) > 2]
+        raw_words = [clean_word(w) for w in query.split() if len(clean_word(w)) > 2]
         keywords_set = set(raw_words)
         for word in raw_words:
             for base, syns in SYNONYMES.items():
