@@ -1,8 +1,6 @@
 """NEXUS Plateforme v4.0 - CHU Brugmann
-Recherche hybride multi-sources : Discovery Engine (PDF + Web) + BigQuery (CCT)
 Hierarchie legale belge + Regle de Faveur + Contexte CP/Region
 """
-
 import streamlit as st
 import google.generativeai as genai
 import json
@@ -35,7 +33,6 @@ with st.sidebar:
 
     # --- Selecteurs de contexte ---
     st.subheader("📋 Parametres de la Consultation")
-
     commission_paritaire = st.selectbox(
         "Commission Paritaire (CP):",
         [
@@ -45,7 +42,6 @@ with st.sidebar:
         ],
         index=0
     )
-
     region_normes = st.selectbox(
         "Region / Normes applicables:",
         [
@@ -60,7 +56,6 @@ with st.sidebar:
 
     # --- Diagnostic ---
     st.subheader("🔧 DIAGNOSTIC SYSTEME")
-
     api_key_ok = False
     gcp_json_ok = False
     gemini_ok = False
@@ -149,9 +144,8 @@ with st.sidebar:
 # ==================== HELPERS: Extraction document ====================
 
 def extract_document_data(result, source_label: str) -> Dict:
-    """
-    Extrait titre, contenu et source depuis un resultat Discovery Engine.
-    source_label: 'PDF' ou 'WEB' pour distinguer l'origine.
+    """Extrait titre, contenu et source depuis un resultat Discovery Engine.
+    source_label est PDF ou WEB pour distinguer l'origine.
     """
     doc = result.document
     derived = dict(doc.derived_struct_data) if doc.derived_struct_data else {}
@@ -171,7 +165,6 @@ def extract_document_data(result, source_label: str) -> Dict:
 
     # Contenu via extractive_answers (PDFs) ou snippets (web)
     content_parts = []
-
     extractive_answers = derived.get("extractive_answers", [])
     if extractive_answers:
         for answer in extractive_answers:
@@ -241,12 +234,9 @@ def query_discovery_engine_single(
     source_label: str,
     credentials
 ) -> List[Dict]:
-    """
-    Interroge un seul Data Store Discovery Engine.
-    """
+    """Interroge un seul Data Store Discovery Engine."""
     try:
         client = discoveryengine_v1.SearchServiceClient(credentials=credentials)
-
         serving_config = (
             f"projects/{PROJECT_ID}"
             f"/locations/{DE_LOCATION}"
@@ -254,13 +244,11 @@ def query_discovery_engine_single(
             f"/dataStores/{datastore_id}"
             f"/servingConfigs/default_search"
         )
-
         request = discoveryengine_v1.SearchRequest(
             serving_config=serving_config,
             query=query,
-            page_size=3,
+            page_size=5,
         )
-
         response = client.search(request)
         documents = []
         for result in response.results:
@@ -270,16 +258,13 @@ def query_discovery_engine_single(
             except Exception:
                 continue
         return documents
-
     except Exception as e:
         st.warning(f"⚠️ Discovery Engine [{source_label}] erreur: {str(e)[:80]}")
         return []
 
 
 def query_all_discovery_engines(query: str, credentials) -> List[Dict]:
-    """
-    Interroge simultanement PDF + WEB et fusionne les resultats.
-    """
+    """Interroge simultanement PDF + WEB et fusionne les resultats."""
     results_pdf = query_discovery_engine_single(query, DATASTORE_PDF, "PDF", credentials)
     results_web = query_discovery_engine_single(query, DATASTORE_WEB, "WEB", credentials)
     return results_pdf + results_web
@@ -288,8 +273,7 @@ def query_all_discovery_engines(query: str, credentials) -> List[Dict]:
 # ==================== SOURCE B: BIGQUERY (CCT) ====================
 
 def query_bigquery_cct(query: str, credentials) -> List[Dict]:
-    """
-    Recherche les CCT pertinentes dans BigQuery via une requete SQL avec LIKE.
+    """Recherche les CCT pertinentes dans BigQuery via une requete SQL avec LIKE.
     Retourne les 5 regles les plus recentes correspondant a la question.
     """
     try:
@@ -302,29 +286,27 @@ def query_bigquery_cct(query: str, credentials) -> List[Dict]:
         keywords = [w for w in query.split() if len(w) > 4][:3]
 
         if not keywords:
-            # Pas de mots-cles utiles: retourne les 5 dernieres CCT
             sql = f"""
                 SELECT *
                 FROM `{BQ_TABLE}`
-                ORDER BY COALESCE(date_extraction, date_entree_vigueur, CURRENT_DATE()) DESC
+                ORDER BY effective_date DESC NULLS LAST
                 LIMIT 5
             """
         else:
-            # Filtre par mots-cles sur les colonnes textuelles disponibles
             like_clauses = []
             for kw in keywords:
                 kw_safe = kw.replace("'", "''")
                 like_clauses.append(
-                    f"(LOWER(CAST(regle AS STRING)) LIKE LOWER('%{kw_safe}%')"
-                    f" OR LOWER(CAST(sujet AS STRING)) LIKE LOWER('%{kw_safe}%')"
-                    f" OR LOWER(CAST(source_cct AS STRING)) LIKE LOWER('%{kw_safe}%'))"
+                    f"(LOWER(COALESCE(rule_key, '')) LIKE LOWER('%{kw_safe}%')"
+                    f" OR LOWER(COALESCE(raw_text_snippet, '')) LIKE LOWER('%{kw_safe}%')"
+                    f" OR LOWER(COALESCE(rule_category, '')) LIKE LOWER('%{kw_safe}%'))"
                 )
             where_clause = " OR ".join(like_clauses)
             sql = f"""
                 SELECT *
                 FROM `{BQ_TABLE}`
                 WHERE {where_clause}
-                ORDER BY COALESCE(date_extraction, date_entree_vigueur, CURRENT_DATE()) DESC
+                ORDER BY effective_date DESC NULLS LAST
                 LIMIT 5
             """
 
@@ -334,11 +316,10 @@ def query_bigquery_cct(query: str, credentials) -> List[Dict]:
         if not rows:
             return []
 
-        # Convertit les lignes en dicts exploitables
         documents = []
         for row in rows:
             row_dict = dict(row)
-            # Construit un contenu lisible pour Gemini
+
             content_parts = []
             for col, val in row_dict.items():
                 if val is not None and str(val).strip():
@@ -346,9 +327,9 @@ def query_bigquery_cct(query: str, credentials) -> List[Dict]:
             content = "\\n".join(content_parts)
 
             title = (
-                str(row_dict.get("sujet", ""))
-                or str(row_dict.get("source_cct", ""))
-                or str(row_dict.get("numero_cct", ""))
+                str(row_dict.get("rule_category", "") or "")
+                or str(row_dict.get("document_source_uri", "") or "")
+                or str(row_dict.get("rule_key", "") or "")
                 or "CCT sans titre"
             )
 
@@ -356,8 +337,8 @@ def query_bigquery_cct(query: str, credentials) -> List[Dict]:
                 "title": title,
                 "content": content,
                 "snippet": content[:300],
-                "source_uri": str(row_dict.get("source_cct", "") or row_dict.get("lien", "") or "BigQuery"),
-                "doc_id": str(row_dict.get("id", "")),
+                "source_uri": str(row_dict.get("document_source_uri", "") or "BigQuery"),
+                "doc_id": str(row_dict.get("rule_key", "") or ""),
                 "source_type": "CCT_BIGQUERY",
             })
 
@@ -377,9 +358,7 @@ def query_bigquery_cct(query: str, credentials) -> List[Dict]:
 # ==================== GENERATION GEMINI ====================
 
 def build_system_prompt(commission_paritaire: str, region_normes: str) -> str:
-    """
-    Construit le system prompt dynamique selon le contexte CP et Region choisis.
-    """
+    """Construit le system prompt dynamique selon le contexte CP et Region choisis."""
     cp_short = commission_paritaire.split(" -- ")[0]
     region_short = region_normes.split(" (")[0]
 
@@ -424,9 +403,7 @@ def generate_response(
     commission_paritaire: str,
     region_normes: str
 ) -> str:
-    """
-    Genere une reponse Gemini avec contexte multi-sources (PDF + WEB + CCT BigQuery).
-    """
+    """Genere une reponse Gemini avec contexte multi-sources (PDF + WEB + CCT BigQuery)."""
     try:
         system_prompt = build_system_prompt(commission_paritaire, region_normes)
 
@@ -480,8 +457,7 @@ QUESTION DU DELEGUE SYNDICAL:
 {context_cct}
 
 ========================================
-CONSIGNE FINALE:
-Reponds en francais. Applique la hierarchie legale belge et la regle de faveur.
+CONSIGNE FINALE: Reponds en francais. Applique la hierarchie legale belge et la regle de faveur.
 Cite chaque source avec son label [SOURCE PDF], [SOURCE WEB] ou [SOURCE CCT BigQuery].
 Formule une recommandation pratique en conclusion."""
 
@@ -525,11 +501,10 @@ for message in st.session_state.messages:
                     uri = src["source_uri"] or ""
                     st.markdown(f"{icon} **[{src['source_type']}]** {label}")
                     if uri:
-                        st.caption(f"   {uri}")
+                        st.caption(f"  {uri}")
 
-# Input utilisateur -- variable nommee user_input partout (pas de user_query)
+# Input utilisateur
 if user_input := st.chat_input("Posez votre question juridique..."):
-
     if not all_ok:
         st.error("⚠️ Systeme non configure. Verifiez les diagnostics dans la sidebar.")
         st.stop()
@@ -543,18 +518,6 @@ if user_input := st.chat_input("Posez votre question juridique..."):
     if not credentials:
         st.error("❌ Impossible de creer les credentials GCP.")
         st.stop()
-
-    # Recherche multi-sources en parallele (sequentielle pour Streamlit)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        with st.spinner("📄 Protocoles PDF..."):
-            pass
-    with col2:
-        with st.spinner("🌐 Veille web..."):
-            pass
-    with col3:
-        with st.spinner("🗄️ CCT BigQuery..."):
-            pass
 
     with st.spinner("🔍 Recherche multi-sources en cours..."):
         rag_pdf_web = query_all_discovery_engines(user_input, credentials)
@@ -623,4 +586,4 @@ with c4:
     st.metric("Mode", "PLATEFORME v4.0")
 
 st.caption("⚖️ NExUS Plateforme v4.0 -- Production | Hierarchie legale belge + Regle de Faveur")
-st.caption("📚 Base documentaire: 520 protocoles CHU Brugmann synchronises | CCT via BigQuery | Veille web active")
+st.caption("📚 Base documentaire: 520 protocoles CHU Brugmann | CCT via BigQuery | Veille web active")
