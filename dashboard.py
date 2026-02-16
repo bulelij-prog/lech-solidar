@@ -1,7 +1,7 @@
 """
-NEXUS - Système RAG Hybride pour CHU Brugmann
+NEXUS - Systeme RAG Hybride pour CHU Brugmann
 Gemini (chat) + Discovery Engine (recherche documentaire)
-Hiérarchie légale belge + Règle de Faveur
+Hierarchie legale belge + Regle de Faveur
 Version 3.0 - Production
 """
 
@@ -19,10 +19,10 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚖️ NEXUS - Système d'Aide Juridique (CHU Brugmann)")
-st.markdown("**Recherche RAG + Conseil Gemini avec hiérarchie légale belge et règle de faveur**")
+st.title("⚖️ NEXUS - Systeme d'Aide Juridique (CHU Brugmann)")
+st.markdown("**Recherche RAG + Conseil Gemini avec hierarchie legale belge et regle de faveur**")
 
-# ==================== SIDEBAR DIAGNOSTIC ====================
+# ==================== SIDEBAR ====================
 with st.sidebar:
     st.header("🔧 DIAGNOSTIC & CONFIGURATION")
     st.divider()
@@ -123,60 +123,57 @@ with st.sidebar:
 
 
 # ==================== SYSTEM PROMPT ====================
-SYSTEM_PROMPT = """Tu es un assistant juridique spécialisé en droit du travail belge pour les délégués syndicaux du CHU Brugmann.
+SYSTEM_PROMPT = """Tu es un assistant juridique specialise en droit du travail belge pour les delegues syndicaux du CHU Brugmann.
 
-**HIÉRARCHIE LÉGALE BELGE (Applique STRICTEMENT dans cet ordre):**
-1. Loi belge fédérale (code du travail, conventions collectives nationales)
+HIERARCHIE LEGALE BELGE (Applique STRICTEMENT dans cet ordre):
+1. Loi belge federale (code du travail, conventions collectives nationales)
 2. Conventions collectives du travail (CCT) sectorielles/entreprise
 3. Protocoles internes du CHU Brugmann (consensuels)
 
-**RÈGLE DE FAVEUR (Principe cardinal):**
-En cas de conflit entre deux normes, applique toujours celle qui est PLUS FAVORABLE au travailleur/à la travailleuse.
-Exemple: Si une CCT dit "30 jours de congé" mais la loi fédérale dit "25 jours", applique 30 jours.
-Exemple 2: Si un protocole local dit "salaire minimum 2000€" mais la loi dit "2500€", applique 2500€.
+REGLE DE FAVEUR (Principe cardinal):
+En cas de conflit entre deux normes, applique toujours celle qui est PLUS FAVORABLE au travailleur.
+Exemple: Si une CCT dit "30 jours de conge" mais la loi federale dit "25 jours", applique 30 jours.
+Exemple 2: Si un protocole local dit "salaire minimum 2000 EUR" mais la loi dit "2500 EUR", applique 2500 EUR.
 
-**SOURCES & CITATIONS:**
+SOURCES ET CITATIONS:
 - Cite TOUJOURS la source: "Loi du...", "CCT du...", "Article X du Protocole..."
-- Si un document RAG contredit la loi belge, privilégie LA LOI et explique pourquoi.
-- Inclus la section/article spécifique quand c'est possible.
+- Si un document RAG contredit la loi belge, privilegia LA LOI et explique pourquoi.
+- Inclus la section/article specifique quand c'est possible.
 
-**TRANSPARENCE:**
-- Sois honnête sur ce que tu ignores.
+TRANSPARENCE:
+- Sois honnete sur ce que tu ignores.
 - Si le document RAG ne contient pas l'information, dis-le explicitement.
 - Conseille de consulter un juriste pour les cas complexes.
 """
 
 
-# ==================== HELPER: Extraction des données document ====================
+# ==================== HELPER: extraction des donnees document ====================
 
 def extract_document_data(result) -> Dict:
     """
-    Extrait titre, contenu et source depuis un résultat Discovery Engine.
-    Stratégie: derived_struct_data (extractive_answers + snippets) → struct_data → link → doc.id
+    Extrait titre, contenu et source depuis un resultat Discovery Engine.
+    Priorite: derived_struct_data (extractive_answers + snippets) -> struct_data -> link -> doc.id
     """
     doc = result.document
 
-    # Récupère derived_struct_data une seule fois
     derived = dict(doc.derived_struct_data) if doc.derived_struct_data else {}
     struct = dict(doc.struct_data) if doc.struct_data else {}
 
-    # --- TITRE ---
-    # Pour les PDFs, le nom du fichier est dans derived["link"]
+    # TITRE: pour les PDFs, le nom du fichier est dans derived["link"]
     title = (
         struct.get("title")
         or struct.get("name")
         or derived.get("title")
         or derived.get("name")
-        or derived.get("link", "").split("/")[-1]   # Nom de fichier extrait du lien GCS
-        or doc.name.split("/")[-1]                   # Nom extrait du chemin document
+        or derived.get("link", "").split("/")[-1]
+        or doc.name.split("/")[-1]
         or doc.id
         or "Document sans titre"
     )
 
-    # --- CONTENU: priorité à extractive_answers (texte exact des PDFs) ---
+    # CONTENU: priorite a extractive_answers (texte exact des PDFs)
     content_parts = []
 
-    # extractive_answers: passages exacts extraits du PDF par Google
     extractive_answers = derived.get("extractive_answers", [])
     if extractive_answers:
         for answer in extractive_answers:
@@ -187,7 +184,6 @@ def extract_document_data(result) -> Dict:
                     prefix = f"[Page {page_num}] " if page_num else ""
                     content_parts.append(f"{prefix}{text}")
 
-    # snippets: extraits contextuels si pas d'extractive_answers
     if not content_parts:
         snippets = derived.get("snippets", [])
         for snippet in snippets:
@@ -196,7 +192,6 @@ def extract_document_data(result) -> Dict:
                 if text:
                     content_parts.append(text)
 
-    # Fallback: champs textuels directs
     if not content_parts:
         fallback = (
             derived.get("content", "")
@@ -207,10 +202,9 @@ def extract_document_data(result) -> Dict:
         if fallback:
             content_parts.append(fallback)
 
-    # Assemble le contenu final (2000 chars max pour ne pas saturer le prompt)
     content = "\\n\\n".join(content_parts)[:2000]
 
-    # --- SOURCE URI ---
+    # SOURCE URI
     source_uri = (
         struct.get("source_uri", "")
         or struct.get("uri", "")
@@ -298,11 +292,11 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
 
 def generate_response(user_input: str, rag_documents: List[Dict], model_choice: str) -> str:
     """
-    Génère une réponse Gemini enrichie avec le contexte RAG extrait des PDFs.
+    Genere une reponse Gemini enrichie avec le contexte RAG extrait des PDFs.
     """
     try:
         if rag_documents:
-            context = "\\n---\\n**DOCUMENTS PERTINENTS (Discovery Engine - Protocoles CHU Brugmann):**\\n"
+            context = "\\nDOCUMENTS PERTINENTS (Discovery Engine - Protocoles CHU Brugmann):\\n"
             for i, doc in enumerate(rag_documents, 1):
                 context += f"\\n[Document {i}] {doc['title']}\\n"
                 if doc['content']:
@@ -310,25 +304,22 @@ def generate_response(user_input: str, rag_documents: List[Dict], model_choice: 
                 if doc['source_uri']:
                     context += f"Source: {doc['source_uri']}\\n"
         else:
-            context = "\\n---\\n**Aucun document pertinent trouvé dans les 520 protocoles CHU Brugmann.**\\n"
+            context = "\\nAucun document pertinent trouve dans les 520 protocoles CHU Brugmann.\\n"
 
         full_prompt = f"""{SYSTEM_PROMPT}
 
----
 QUESTION DE L'UTILISATEUR:
 {user_input}
 
----
 {context}
 
----
 INSTRUCTION FINALE:
-Réponds à la question en appliquant strictement:
-1. La hiérarchie légale belge (Loi > CCT > Protocole)
-2. La règle de faveur (favorise toujours le travailleur en cas de conflit)
-3. Les documents RAG comme référence principale (mais la loi prime toujours)
+Reponds a la question en appliquant strictement:
+1. La hierarchie legale belge (Loi > CCT > Protocole)
+2. La regle de faveur (favorise toujours le travailleur en cas de conflit)
+3. Les documents RAG comme reference principale (mais la loi prime toujours)
 
-Sois clair, structuré, et cite tes sources avec précision."""
+Sois clair, structure, et cite tes sources avec precision."""
 
         model = genai.GenerativeModel(model_choice)
         response = model.generate_content(full_prompt)
@@ -342,27 +333,25 @@ Sois clair, structuré, et cite tes sources avec précision."""
 
 st.divider()
 st.header("💬 Assistant Juridique NEXUS")
-st.markdown("Posez vos questions sur le droit du travail belge. Le système recherche dans vos 520 protocoles et applique la règle de faveur.")
+st.markdown("Posez vos questions sur le droit du travail belge. Le systeme recherche dans vos 520 protocoles et applique la regle de faveur.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Affichage de l'historique
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "sources" in message and message["sources"]:
-            with st.expander("📄 Sources utilisées"):
+            with st.expander("📄 Sources utilisees"):
                 for source in message["sources"]:
                     label = source["title"] if source["title"] != "Document sans titre" else source["doc_id"]
                     uri = source["source_uri"]
-                    st.markdown(f"- **{label}** — `{uri}`")
+                    st.markdown(f"- **{label}** -- `{uri}`")
 
-# Input utilisateur
 if user_input := st.chat_input("Posez votre question juridique..."):
 
     if not all_ok:
-        st.error("⚠️ Système non configuré. Vérifiez la sidebar.")
+        st.error("⚠️ Systeme non configure. Verifiez la sidebar.")
         st.stop()
 
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -372,7 +361,7 @@ if user_input := st.chat_input("Posez votre question juridique..."):
     with st.spinner("🔍 Recherche dans les 520 protocoles CHU Brugmann..."):
         rag_documents = query_discovery_engine(user_input, project_id, datastore_id, location)
 
-    with st.spinner("⚖️ Gemini analyse et applique la règle de faveur..."):
+    with st.spinner("⚖️ Gemini analyse et applique la regle de faveur..."):
         response_text = generate_response(user_input, rag_documents, model_choice)
 
     with st.chat_message("assistant"):
@@ -385,7 +374,7 @@ if user_input := st.chat_input("Posez votre question juridique..."):
     })
 
     if rag_documents:
-        with st.expander(f"📊 Documents consultés ({len(rag_documents)} résultats)"):
+        with st.expander(f"📊 Documents consultes ({len(rag_documents)} resultats)"):
             for i, doc in enumerate(rag_documents, 1):
                 st.markdown(f"**{i}. {doc['title']}**")
                 st.caption(f"Source: {doc['source_uri']}")
@@ -404,19 +393,5 @@ with col2:
 with col3:
     st.metric("Mode", "RAG + GEMINI")
 
-st.caption("⚖️ NEXUS v3.0 — Production | Hiérarchie légale belge + Règle de Faveur")
-st.caption("📚 Base documentaire : 520 protocoles CHU Brugmann synchronisés")
-```
-
----
-
-## ✅ **Trois changements clés v2.3 → v3.0**
-
-**1. Debug supprimé** — Le bloc `🔬 DEBUG` et tous les `st.write(result.document)` sont retirés. L'interface est propre.
-
-**2. `extractive_answers` optimisé** — Le contenu de chaque réponse extractive inclut maintenant le numéro de page (`[Page 3] texte exact du PDF`) quand il est disponible, ce qui donne à Gemini un contexte précis pour citer ses sources avec page.
-
-**3. Mention base documentaire** — Deux lignes de footer :
-```
-⚖️ NEXUS v3.0 — Production | Hiérarchie légale belge + Règle de Faveur
-📚 Base documentaire : 520 protocoles CHU Brugmann synchronisés
+st.caption("⚖️ NEXUS v3.0 -- Production | Hierarchie legale belge + Regle de Faveur")
+st.caption("📚 Base documentaire : 520 protocoles CHU Brugmann synchronises")
