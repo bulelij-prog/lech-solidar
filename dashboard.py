@@ -2,6 +2,7 @@
 NEXUS - Système RAG Hybride pour CHU Brugmann
 Gemini (chat) + Discovery Engine (recherche documentaire)
 Hiérarchie légale belge + Règle de Faveur
+Version 3.0 - Production
 """
 
 import streamlit as st
@@ -26,9 +27,7 @@ with st.sidebar:
     st.header("🔧 DIAGNOSTIC & CONFIGURATION")
     st.divider()
 
-    # CHECK 1: Secrets
     st.subheader("1️⃣ Configuration Secrets")
-
     api_key_ok = False
     gcp_json_ok = False
 
@@ -46,7 +45,7 @@ with st.sidebar:
         gcp_json_str = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON")
         if gcp_json_str:
             try:
-                gcp_json = json.loads(gcp_json_str)
+                json.loads(gcp_json_str)
                 st.success("✅ GCP_SERVICE_ACCOUNT_JSON found (valid JSON)")
                 gcp_json_ok = True
             except json.JSONDecodeError:
@@ -58,9 +57,7 @@ with st.sidebar:
 
     st.divider()
 
-    # CHECK 2: Gemini Connection
     st.subheader("2️⃣ Gemini Connection")
-
     gemini_ok = False
     try:
         if api_key_ok:
@@ -79,15 +76,13 @@ with st.sidebar:
 
     st.divider()
 
-    # CHECK 3: Discovery Engine Credentials
     st.subheader("3️⃣ Discovery Engine Connection")
-
     discovery_ok = False
     try:
         if gcp_json_ok:
             try:
                 gcp_json_check = json.loads(st.secrets.get("GCP_SERVICE_ACCOUNT_JSON"))
-                credentials_check = service_account.Credentials.from_service_account_info(gcp_json_check)
+                service_account.Credentials.from_service_account_info(gcp_json_check)
                 st.success("✅ GCP credentials: Successfully created from JSON")
                 discovery_ok = True
             except Exception as e:
@@ -99,7 +94,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Model selector
     st.subheader("📌 Gemini Model")
     if gemini_ok:
         model_choice = st.selectbox(
@@ -112,7 +106,6 @@ with st.sidebar:
         st.warning("Cannot select model: Gemini connection failed")
         model_choice = "gemini-2.0-flash"
 
-    # Discovery Engine parameters
     st.subheader("🔍 Discovery Engine Settings")
     project_id = "syndicat-novembre-2025"
     datastore_id = "nexus-cgsp-pdf-global"
@@ -122,7 +115,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Status summary
     all_ok = api_key_ok and gcp_json_ok and gemini_ok and discovery_ok
     if all_ok:
         st.success("### 🟢 ALL SYSTEMS GO")
@@ -155,91 +147,77 @@ Exemple 2: Si un protocole local dit "salaire minimum 2000€" mais la loi dit "
 """
 
 
-# ==================== HELPER: Extract best available text ====================
+# ==================== HELPER: Extraction des données document ====================
 
 def extract_document_data(result) -> Dict:
     """
     Extrait titre, contenu et source depuis un résultat Discovery Engine.
-    Stratégie en cascade: derived_struct_data → struct_data → document.name → document.id
+    Stratégie: derived_struct_data (extractive_answers + snippets) → struct_data → link → doc.id
     """
     doc = result.document
 
-    # --- Titre: cascade de fallbacks ---
-    title = "Unknown"
+    # Récupère derived_struct_data une seule fois
+    derived = dict(doc.derived_struct_data) if doc.derived_struct_data else {}
+    struct = dict(doc.struct_data) if doc.struct_data else {}
 
-    # Tentative 1: struct_data standard
-    if doc.struct_data:
-        title = (
-            doc.struct_data.get("title")
-            or doc.struct_data.get("name")
-            or doc.struct_data.get("filename")
-            or "Unknown"
+    # --- TITRE ---
+    # Pour les PDFs, le nom du fichier est dans derived["link"]
+    title = (
+        struct.get("title")
+        or struct.get("name")
+        or derived.get("title")
+        or derived.get("name")
+        or derived.get("link", "").split("/")[-1]   # Nom de fichier extrait du lien GCS
+        or doc.name.split("/")[-1]                   # Nom extrait du chemin document
+        or doc.id
+        or "Document sans titre"
+    )
+
+    # --- CONTENU: priorité à extractive_answers (texte exact des PDFs) ---
+    content_parts = []
+
+    # extractive_answers: passages exacts extraits du PDF par Google
+    extractive_answers = derived.get("extractive_answers", [])
+    if extractive_answers:
+        for answer in extractive_answers:
+            if isinstance(answer, dict):
+                page_num = answer.get("pageNumber", "")
+                text = answer.get("content", "").strip()
+                if text:
+                    prefix = f"[Page {page_num}] " if page_num else ""
+                    content_parts.append(f"{prefix}{text}")
+
+    # snippets: extraits contextuels si pas d'extractive_answers
+    if not content_parts:
+        snippets = derived.get("snippets", [])
+        for snippet in snippets:
+            if isinstance(snippet, dict):
+                text = snippet.get("snippet", "").strip()
+                if text:
+                    content_parts.append(text)
+
+    # Fallback: champs textuels directs
+    if not content_parts:
+        fallback = (
+            derived.get("content", "")
+            or struct.get("content", "")
+            or struct.get("text", "")
+            or struct.get("body", "")
         )
+        if fallback:
+            content_parts.append(fallback)
 
-    # Tentative 2: derived_struct_data (extraits générés par Google pour les PDFs)
-    derived = {}
-    if doc.derived_struct_data:
-        derived = dict(doc.derived_struct_data)
-        if title == "Unknown":
-            title = (
-                derived.get("title")
-                or derived.get("name")
-                or "Unknown"
-            )
+    # Assemble le contenu final (2000 chars max pour ne pas saturer le prompt)
+    content = "\\n\\n".join(content_parts)[:2000]
 
-    # Tentative 3: extraire le nom de fichier depuis doc.name (chemin GCS)
-    if title == "Unknown" and doc.name:
-        # doc.name ressemble à: projects/.../documents/abc123
-        # ou la source GCS est dans struct_data.source_uri
-        parts = doc.name.split("/")
-        title = parts[-1] if parts else doc.id or "Unknown"
-
-    # Tentative 4: utiliser l'ID du document comme titre de dernier recours
-    if title == "Unknown" and doc.id:
-        title = doc.id
-
-    # --- Contenu: cascade derived → struct ---
-    content = ""
-
-    # derived_struct_data contient souvent "extractive_answers" ou "snippets" pour les PDFs
-    if derived:
-        # Extraits de réponse (extractive_answers)
-        extractive_answers = derived.get("extractive_answers", [])
-        if extractive_answers:
-            content = " ".join([
-                a.get("content", "") for a in extractive_answers
-                if isinstance(a, dict)
-            ])[:1500]
-
-        # Snippets si pas d'extractive_answers
-        if not content:
-            snippets = derived.get("snippets", [])
-            if snippets:
-                content = " ".join([
-                    s.get("snippet", "") for s in snippets
-                    if isinstance(s, dict)
-                ])[:1500]
-
-        # Contenu brut dans derived
-        if not content:
-            content = derived.get("content", "")[:1500]
-
-    # Fallback: struct_data classique
-    if not content and doc.struct_data:
-        content = (
-            doc.struct_data.get("content", "")
-            or doc.struct_data.get("text", "")
-            or doc.struct_data.get("body", "")
-        )[:1500]
-
-    # --- Source URI ---
-    source_uri = ""
-    if doc.struct_data:
-        source_uri = doc.struct_data.get("source_uri", "") or doc.struct_data.get("uri", "")
-    if not source_uri and derived:
-        source_uri = derived.get("source_uri", "") or derived.get("link", "")
-    if not source_uri and doc.name:
-        source_uri = doc.name
+    # --- SOURCE URI ---
+    source_uri = (
+        struct.get("source_uri", "")
+        or struct.get("uri", "")
+        or derived.get("link", "")
+        or derived.get("source_uri", "")
+        or doc.name
+    )
 
     return {
         "title": title,
@@ -247,12 +225,10 @@ def extract_document_data(result) -> Dict:
         "snippet": content[:300],
         "source_uri": source_uri,
         "doc_id": doc.id or "",
-        "_raw_derived": derived,        # Gardé pour le debug temporaire
-        "_raw_struct": dict(doc.struct_data) if doc.struct_data else {},
     }
 
 
-# ==================== FUNCTIONS ====================
+# ==================== QUERY DISCOVERY ENGINE ====================
 
 def query_discovery_engine(query: str, project_id: str, datastore_id: str, location: str) -> List[Dict]:
     """
@@ -311,35 +287,6 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
                 st.warning(f"⚠️ Error parsing one document: {str(e)[:50]}")
                 continue
 
-        # ============================================================
-        # DEBUG TEMPORAIRE: Affiche la structure brute du 1er résultat
-        # Supprime ce bloc dès que les titres s'affichent correctement
-        # ============================================================
-        if response.results:
-            with st.expander("🔬 DEBUG - Structure brute du Document 1 (supprimer après diagnostic)", expanded=True):
-                first_result = response.results[0]
-                st.markdown("**`result.document` (objet complet):**")
-                st.write(first_result.document)
-                st.divider()
-                st.markdown("**`struct_data` (clés disponibles):**")
-                if first_result.document.struct_data:
-                    st.json(dict(first_result.document.struct_data))
-                else:
-                    st.warning("struct_data est vide")
-                st.divider()
-                st.markdown("**`derived_struct_data` (clés disponibles):**")
-                if first_result.document.derived_struct_data:
-                    st.json(dict(first_result.document.derived_struct_data))
-                else:
-                    st.warning("derived_struct_data est vide")
-                st.divider()
-                st.markdown("**`document.name` et `document.id`:**")
-                st.write(f"name: `{first_result.document.name}`")
-                st.write(f"id: `{first_result.document.id}`")
-        # ============================================================
-        # FIN DEBUG TEMPORAIRE
-        # ============================================================
-
         return documents
 
     except Exception as e:
@@ -347,21 +294,23 @@ def query_discovery_engine(query: str, project_id: str, datastore_id: str, locat
         return []
 
 
+# ==================== GENERATE GEMINI RESPONSE ====================
+
 def generate_response(user_input: str, rag_documents: List[Dict], model_choice: str) -> str:
     """
-    Génère une réponse Gemini avec contexte RAG.
+    Génère une réponse Gemini enrichie avec le contexte RAG extrait des PDFs.
     """
     try:
         if rag_documents:
-            context = "\\n---\\n**DOCUMENTS PERTINENTS (Discovery Engine):**\\n"
+            context = "\\n---\\n**DOCUMENTS PERTINENTS (Discovery Engine - Protocoles CHU Brugmann):**\\n"
             for i, doc in enumerate(rag_documents, 1):
                 context += f"\\n[Document {i}] {doc['title']}\\n"
                 if doc['content']:
-                    context += f"Contenu: {doc['content']}\\n"
+                    context += f"{doc['content']}\\n"
                 if doc['source_uri']:
                     context += f"Source: {doc['source_uri']}\\n"
         else:
-            context = "\\n---\\n**Aucun document trouvé dans le Data Store.**\\n"
+            context = "\\n---\\n**Aucun document pertinent trouvé dans les 520 protocoles CHU Brugmann.**\\n"
 
         full_prompt = f"""{SYSTEM_PROMPT}
 
@@ -375,11 +324,11 @@ QUESTION DE L'UTILISATEUR:
 ---
 INSTRUCTION FINALE:
 Réponds à la question en appliquant strictement:
-1. La hiérarchie légale belge
-2. La règle de faveur (favorise toujours le travailleur)
-3. Les documents RAG comme référence (mais la loi prime)
+1. La hiérarchie légale belge (Loi > CCT > Protocole)
+2. La règle de faveur (favorise toujours le travailleur en cas de conflit)
+3. Les documents RAG comme référence principale (mais la loi prime toujours)
 
-Sois clair, structuré, et cite tes sources."""
+Sois clair, structuré, et cite tes sources avec précision."""
 
         model = genai.GenerativeModel(model_choice)
         response = model.generate_content(full_prompt)
@@ -398,28 +347,32 @@ st.markdown("Posez vos questions sur le droit du travail belge. Le système rech
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Affichage de l'historique
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "sources" in message and message["sources"]:
-            with st.expander("📄 Sources"):
+            with st.expander("📄 Sources utilisées"):
                 for source in message["sources"]:
-                    st.markdown(f"- **{source['title']}**: {source['source_uri']}")
+                    label = source["title"] if source["title"] != "Document sans titre" else source["doc_id"]
+                    uri = source["source_uri"]
+                    st.markdown(f"- **{label}** — `{uri}`")
 
+# Input utilisateur
 if user_input := st.chat_input("Posez votre question juridique..."):
 
     if not all_ok:
-        st.error("⚠️ System not fully configured. Check sidebar for issues.")
+        st.error("⚠️ Système non configuré. Vérifiez la sidebar.")
         st.stop()
 
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    with st.spinner("🔍 Searching Discovery Engine (520 protocoles)..."):
+    with st.spinner("🔍 Recherche dans les 520 protocoles CHU Brugmann..."):
         rag_documents = query_discovery_engine(user_input, project_id, datastore_id, location)
 
-    with st.spinner("⚙️ Gemini analyse et applique la règle de faveur..."):
+    with st.spinner("⚖️ Gemini analyse et applique la règle de faveur..."):
         response_text = generate_response(user_input, rag_documents, model_choice)
 
     with st.chat_message("assistant"):
@@ -432,11 +385,13 @@ if user_input := st.chat_input("Posez votre question juridique..."):
     })
 
     if rag_documents:
-        with st.expander(f"📊 RAG Context ({len(rag_documents)} documents trouvés)"):
+        with st.expander(f"📊 Documents consultés ({len(rag_documents)} résultats)"):
             for i, doc in enumerate(rag_documents, 1):
-                st.subheader(f"Document {i}: {doc['title']}")
-                st.write(f"**Source:** {doc['source_uri']}")
-                st.write(f"**Extrait:** {doc['snippet']}")
+                st.markdown(f"**{i}. {doc['title']}**")
+                st.caption(f"Source: {doc['source_uri']}")
+                if doc['snippet']:
+                    st.markdown(f"> {doc['snippet']}")
+                st.divider()
 
 
 # ==================== FOOTER ====================
@@ -447,6 +402,21 @@ with col1:
 with col2:
     st.metric("Streamlit", st.__version__)
 with col3:
-    st.metric("Mode", "HYBRID RAG+GEMINI")
+    st.metric("Mode", "RAG + GEMINI")
 
-st.caption("NEXUS v2.3 | Hybride Gemini + Discovery Engine | Hiérarchie belge + Règle de Faveur")
+st.caption("⚖️ NEXUS v3.0 — Production | Hiérarchie légale belge + Règle de Faveur")
+st.caption("📚 Base documentaire : 520 protocoles CHU Brugmann synchronisés")
+```
+
+---
+
+## ✅ **Trois changements clés v2.3 → v3.0**
+
+**1. Debug supprimé** — Le bloc `🔬 DEBUG` et tous les `st.write(result.document)` sont retirés. L'interface est propre.
+
+**2. `extractive_answers` optimisé** — Le contenu de chaque réponse extractive inclut maintenant le numéro de page (`[Page 3] texte exact du PDF`) quand il est disponible, ce qui donne à Gemini un contexte précis pour citer ses sources avec page.
+
+**3. Mention base documentaire** — Deux lignes de footer :
+```
+⚖️ NEXUS v3.0 — Production | Hiérarchie légale belge + Règle de Faveur
+📚 Base documentaire : 520 protocoles CHU Brugmann synchronisés
