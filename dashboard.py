@@ -1,4 +1,4 @@
-"""
+⚖️⚖️⚙️📋🔧✅❌❌✅❌❌❌✅❌❌✅❌❌📌🟢🟡⚠️⚠️⚠️⚠️⚠️❌💬📄📄🌐🗄️📎⚠️❌🔍📄🌐🗄️⚖️📊📄📄🌐🗄️🗄️⚖️📚"""
 NEXUS Plateforme v4.0 - CHU Brugmann
 Recherche hybride multi-sources : Discovery Engine (PDF + Web) + BigQuery (CCT)
 Hierarchie legale belge + Regle de Faveur + Contexte CP/Region
